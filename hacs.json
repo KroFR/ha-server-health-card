@@ -1,5 +1,5 @@
 {
-  "name": "Freebox Card",
+  "name": "HA Server Health Card",
   "filename": "ha-server-health-card.js",
   "render_readme": true,
   "content_in_root": false,
