@@ -36,8 +36,8 @@ If System Monitor is unavailable or a sensor is disabled, the affected tile disp
 ## 📦 Installation
 
 #### Marketplace (HA 2026.11 and newer)
-
-[Open this repository in the Home Assistant Community Store](https://my.home-assistant.io/redirect/hacs_repository/?owner=KroFR&repository=ha-server-health-card)  
+ 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=KroFR&repository=ha-server-health-card)
 
 or
 
@@ -79,18 +79,19 @@ The card automatically discovers supported Home Assistant entities.
 
 ### ⚙️ Configuration
 
+The visual editor covers the main settings. Every option below can also be configured directly in YAML.
+
 #### General options
 
-<table>
-<tr><th>Name</th><th>Type</th><th>Required</th><th>Default</th><th>Description</th></tr>
-<tr><td>type</td><td>string</td><td>yes</td><td>—</td><td><code>custom:ha-server-health-card</code></td></tr>
-<tr><td>title</td><td>string</td><td>no</td><td>Localized title</td><td>Custom card title</td></tr>
-<tr><td>subtitle</td><td>string</td><td>no</td><td>Localized subtitle</td><td>Custom card subtitle</td></tr>
-<tr><td>language</td><td>string</td><td>no</td><td>auto</td><td><code>auto</code>, <code>en</code>, or <code>fr</code></td></tr>
-<tr><td>show_icon</td><td>boolean</td><td>no</td><td>true</td><td>Show the card icon</td></tr>
-<tr><td>show_header</td><td>boolean</td><td>no</td><td>true</td><td>Show the title and subtitle</td></tr>
-<tr><td>section_order</td><td>list</td><td>no</td><td>See below</td><td>Order of visible card sections</td></tr>
-</table>
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `type` | string | Required | Must be `custom:ha-server-health-card`. |
+| `title` | string | Localized title | Overrides the card title. An empty value uses the translated default. |
+| `subtitle` | string | Localized subtitle | Overrides the card subtitle. An empty value uses the translated default. |
+| `language` | string | `auto` | Translation language: `auto`, `en`, or `fr`. `auto` follows the Home Assistant user preference. |
+| `show_icon` | boolean | `true` | Shows the Home Assistant icon in the card header. |
+| `show_header` | boolean | `true` | Shows the card title and subtitle. |
+| `section_order` | list | See below | Controls the order of the six card sections. Unknown or missing section IDs are normalized automatically. |
 
 Default section order:
 
@@ -106,17 +107,67 @@ section_order:
 
 #### Section visibility
 
-<table>
-<tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>
-<tr><td>show_home_assistant</td><td>boolean</td><td>true</td><td>Show Home Assistant versions, components, and entities</td></tr>
-<tr><td>show_system</td><td>boolean</td><td>true</td><td>Show CPU, memory, disk, database, IP address, and uptime</td></tr>
-<tr><td>show_network</td><td>boolean</td><td>true</td><td>Show download and upload activity</td></tr>
-<tr><td>show_storage</td><td>boolean</td><td>true</td><td>Show discovered storage volumes</td></tr>
-<tr><td>show_updates</td><td>boolean</td><td>true</td><td>Show available updates</td></tr>
-<tr><td>show_backups</td><td>boolean</td><td>true</td><td>Show backup status and schedule</td></tr>
-</table>
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `show_home_assistant` | boolean | `true` | Shows Home Assistant versions, components, and entity statistics. |
+| `show_system` | boolean | `true` | Shows CPU, memory, disk, database, IPv4, and uptime. |
+| `show_network` | boolean | `true` | Shows detected network interfaces and throughput. |
+| `show_storage` | boolean | `true` | Shows detected storage volumes and usage. |
+| `show_updates` | boolean | `true` | Shows available update entities. |
+| `show_backups` | boolean | `true` | Shows backup status, size, dates, and schedule. |
 
-Sections can be reordered directly from the visual editor. All sections start collapsed when no user preference has been stored.
+Sections can be reordered in the visual editor. When no user preference exists, all sections start collapsed.
+
+#### Health analysis
+
+All numeric Health options accept zero or positive values. Percentage thresholds are constrained to `0–100`; database and backup sizes are expressed in decimal megabytes (`MB`).
+
+| Option | Type | Default | Unit | Description |
+|---|---|---:|---|---|
+| `health_analysis_enabled` | boolean | `true` | — | Enables the global Health status, issue list, threshold coloring, and Health checks. |
+| `health_cpu_warning` | number | `90` | `%` | CPU Warning threshold. |
+| `health_cpu_critical` | number | `98` | `%` | CPU Critical threshold. |
+| `health_memory_warning` | number | `90` | `%` | Memory Warning threshold. |
+| `health_memory_critical` | number | `98` | `%` | Memory Critical threshold. |
+| `health_disk_warning` | number | `85` | `%` | Disk and storage-volume Warning threshold. |
+| `health_disk_critical` | number | `95` | `%` | Disk and storage-volume Critical threshold. |
+| `health_database_warning` | number | `1500` | `MB` | Database-size Warning threshold. |
+| `health_database_critical` | number | `3000` | `MB` | Database-size Critical threshold. |
+| `health_backup_size_warning` | number | `1500` | `MB` | Latest-backup-size Warning threshold. |
+| `health_backup_size_critical` | number | `3000` | `MB` | Latest-backup-size Critical threshold. |
+| `health_unavailable_warning` | number | `5` | `%` | Warning threshold for unavailable entities divided by total entities. |
+| `health_unavailable_critical` | number | `15` | `%` | Critical threshold for unavailable entities divided by total entities. |
+| `health_updates_warning` | number | `10` | updates | Available-update Warning threshold. |
+| `health_updates_critical` | number | `20` | updates | Available-update Critical threshold. |
+| `health_check_core_update` | boolean | `true` | — | Adds a Warning issue when a Home Assistant Core update is available. |
+| `health_check_os_update` | boolean | `true` | — | Adds a Warning issue when a Home Assistant OS update is available. |
+| `health_check_backup` | boolean | `true` | — | Adds a Warning issue when the latest backup status indicates a failure. |
+
+Warning is reached when the measured value is greater than or equal to the Warning threshold. Critical takes priority when the Critical threshold is reached.
+
+#### Entity overrides
+
+Entity discovery is enabled by default. Use the following options only when automatic discovery selects the wrong entity or when a custom sensor should be used.
+
+| Option | Type | Default | Expected entity |
+|---|---|---|---|
+| `cpu_entity` | entity ID | Auto-detected | CPU usage sensor, normally `%`. |
+| `memory_entity` | entity ID | Auto-detected | Memory usage sensor, normally `%`. |
+| `disk_entity` | entity ID | Auto-detected | Primary disk usage sensor, normally `%`. |
+| `database_entity` | entity ID | Auto-detected | Home Assistant database-size sensor with a data-size unit. |
+| `uptime_entity` | entity ID | Auto-detected | Uptime or last-boot sensor. |
+| `ipv4_entity` | entity ID | Auto-detected | IPv4 address sensor. |
+| `network_in_entity` | entity ID | Auto-detected | Incoming network-throughput sensor. |
+| `network_out_entity` | entity ID | Auto-detected | Outgoing network-throughput sensor. |
+| `ha_core_update_entity` | entity ID | Auto-detected | Home Assistant Core update entity. |
+| `supervisor_update_entity` | entity ID | Auto-detected | Home Assistant Supervisor update entity. |
+| `ha_os_update_entity` | entity ID | Auto-detected | Home Assistant OS update entity. |
+| `backup_status_entity` | entity ID | Auto-detected | Backup Manager status entity. |
+| `last_backup_entity` | entity ID | Auto-detected | Latest successful automatic-backup date entity. |
+| `last_backup_size_entity` | entity ID | Auto-detected | Latest successful automatic-backup size entity. |
+| `next_backup_entity` | entity ID | Auto-detected | Next scheduled automatic-backup date entity. |
+
+Entity overrides are supported in YAML even though they are not currently exposed in the visual editor.
 
 ## ❤️ Health analysis
 
