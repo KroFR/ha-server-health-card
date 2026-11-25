@@ -120,6 +120,10 @@ const TRANSLATIONS = {
 		cardLayout: "Card layout",
 		healthAnalysis: "Health analysis",
 		healthAnalysisEnabled: "Enable health analysis",
+		healthStatusDisplay: "Health status display",
+		healthStatusAlways: "Always",
+		healthStatusProblems: "Only when there is a problem",
+		healthStatusNever: "Never",
 		healthThresholds: "Health thresholds",
 		healthVariationThresholds: "Variation thresholds",
 		warningThreshold: "Warning threshold",
@@ -263,6 +267,10 @@ const TRANSLATIONS = {
 		cardLayout: "Disposition de la carte",
 		healthAnalysis: "Analyse de santé",
 		healthAnalysisEnabled: "Activer l’analyse de santé",
+		healthStatusDisplay: "Affichage de l’état de santé",
+		healthStatusAlways: "Toujours",
+		healthStatusProblems: "Uniquement en cas de problème",
+		healthStatusNever: "Jamais",
 		healthThresholds: "Seuils de santé",
 		healthVariationThresholds: "Seuils de variation",
 		warningThreshold: "Seuil de vigilance",
@@ -331,6 +339,7 @@ const DEFAULT_CONFIG = {
 	show_updates: true,
 	show_backups: true,
 	health_analysis_enabled: true,
+	health_status_display: "always",
 	health_cpu_warning: 90,
 	health_cpu_critical: 98,
 	health_memory_warning: 90,
@@ -1097,9 +1106,11 @@ class HaServerHealthCard extends HTMLElement {
 	}
 
 	_refreshHero() {
-		const pill = this.shadowRoot.querySelector(".health-status");
-		if (!pill) return;
 		const health = this._health();
+		const pill = this.shadowRoot.querySelector(".health-status");
+		const shouldShow = this._healthStatusVisible(health);
+		if (Boolean(pill) !== shouldShow) { this._render(); return; }
+		if (!pill) return;
 		pill.className = `health-status ${health.level}`;
 		pill.innerHTML = `<span class="health-status-main"><i></i><strong>${health.label}</strong></span><span class="health-status-count">${health.issues.length ? `${health.issues.length} ${this._t("labels.issues")}` : this._t("card.noIssues")}</span>${health.issues.length ? `<ha-icon icon="mdi:chevron-${this._healthDetailsOpen ? "up" : "down"}"></ha-icon>` : ""}`;
 		const current = this.shadowRoot.querySelector("[data-health-details]");
@@ -1199,6 +1210,14 @@ class HaServerHealthCard extends HTMLElement {
 		}
 	}
 
+	_healthStatusVisible(health = this._health()) {
+		if (this._config?.health_analysis_enabled === false) return false;
+		const mode = ["always", "problems", "never"].includes(this._config?.health_status_display) ? this._config.health_status_display : "always";
+		if (mode === "never") return false;
+		if (mode === "problems") return health.issues.length > 0;
+		return true;
+	}
+
 	_render() {
 		if (!this.shadowRoot || !this._config) {
 			return;
@@ -1212,18 +1231,19 @@ class HaServerHealthCard extends HTMLElement {
 		const counts = this._instanceCounts();
 		const title = this._config.title || this._t("card.title");
 		const subtitle = this._config.subtitle || this._t("card.subtitle");
+		const showHealthStatus = this._healthStatusVisible(health);
 		this.shadowRoot.innerHTML = `
 			<style>${this._styles()}</style>
 			<ha-card>
-				<div class="shell ${this._config.show_icon === false && this._config.show_header === false && this._config.health_analysis_enabled === false ? "no-header-content" : ""}">
+				<div class="shell ${this._config.show_icon === false && this._config.show_header === false && !showHealthStatus ? "no-header-content" : ""}">
 					<header class="hero ${this._config.show_header === false ? "header-compact" : ""} ${this._config.show_icon === false && this._config.show_header === false ? "pill-only" : ""}">
 						<div class="hero-row ${this._config.show_icon === false ? "without-icon" : ""}">
 							${this._config.show_icon === false ? "" : `<div class="hero-icon"><ha-icon icon="mdi:home-assistant"></ha-icon></div>`}
 							${this._config.show_header === false ? "" : `<div class="hero-copy"><h2>${this._escape(title)}</h2><span>${this._escape(subtitle)}</span></div>`}
 						</div>
 					</header>
-					${this._config.health_analysis_enabled === false ? "" : `<button type="button" class="health-status ${health.level}" data-toggle-health aria-expanded="${String(this._healthDetailsOpen && health.issues.length > 0)}"><span class="health-status-main"><i></i><strong>${health.label}</strong></span><span class="health-status-count">${health.issues.length ? `${health.issues.length} ${this._t("labels.issues")}` : this._t("card.noIssues")}</span>${health.issues.length ? `<ha-icon icon="mdi:chevron-${this._healthDetailsOpen ? "up" : "down"}"></ha-icon>` : ""}</button>`}
-					${this._config.health_analysis_enabled === false ? "" : this._healthDetailsMarkup(health)}
+					${!showHealthStatus ? "" : `<button type="button" class="health-status ${health.level}" data-toggle-health aria-expanded="${String(this._healthDetailsOpen && health.issues.length > 0)}"><span class="health-status-main"><i></i><strong>${health.label}</strong></span><span class="health-status-count">${health.issues.length ? `${health.issues.length} ${this._t("labels.issues")}` : this._t("card.noIssues")}</span>${health.issues.length ? `<ha-icon icon="mdi:chevron-${this._healthDetailsOpen ? "up" : "down"}"></ha-icon>` : ""}</button>`}
+					${!showHealthStatus ? "" : this._healthDetailsMarkup(health)}
 					${this._renderConfiguredSections(counts, updates)}
 				</div>
 			</ha-card>
@@ -2108,6 +2128,7 @@ class HaServerHealthCardEditor extends HTMLElement {
 		<details class="section">${this._sectionSummary(HaServerHealthCardEditor.SECTION_ICONS.layout,this._t("editor.cardLayout"))}<div class="section-content"><div class="layout-options">${this._switchRow("show_icon",this._t("editor.showIcon"))}${this._switchRow("show_header",this._t("editor.showHeader"))}</div><div class="section-order-list">${this._renderSectionOrder()}</div></div></details>
 		<details class="section">${this._sectionSummary(HaServerHealthCardEditor.SECTION_ICONS.health,this._t("editor.healthAnalysis"))}<div class="section-content health-analysis-content">
 		${this._switchRow("health_analysis_enabled",this._t("editor.healthAnalysisEnabled"))}
+		<div class="field"><span>${this._t("editor.healthStatusDisplay")}</span><ha-selector data-config="health_status_display"></ha-selector></div>
 		<div class="health-analysis-separator"></div>
 		<div class="health-fields">
 		<div class="health-thresholds"><div class="health-thresholds-title">${this._t("editor.healthThresholds")}</div><div class="health-thresholds-grid">
@@ -2136,10 +2157,15 @@ class HaServerHealthCardEditor extends HTMLElement {
 	_initializeSelectors() {
 		this.querySelectorAll("ha-selector[data-config]").forEach((selector) => {
 			selector.hass = this._hass;
+			const healthStatusDisplay = selector.dataset.config === "health_status_display";
 			selector.selector = {
 				select: {
 					mode: "dropdown",
-					options: [
+					options: healthStatusDisplay ? [
+						{ value: "always", label: this._t("editor.healthStatusAlways") },
+						{ value: "problems", label: this._t("editor.healthStatusProblems") },
+						{ value: "never", label: this._t("editor.healthStatusNever") },
+					] : [
 						{ value: "auto", label: this._t("editor.auto") },
 						{ value: "fr", label: "Français" },
 						{ value: "en", label: "English" },
@@ -2170,6 +2196,8 @@ class HaServerHealthCardEditor extends HTMLElement {
 		const fields = this.querySelector(".health-fields");
 		if (fields) fields.classList.toggle("disabled", !enabled);
 		fields?.querySelectorAll("input,ha-switch").forEach((element) => { element.disabled = !enabled; });
+		const statusDisplay = this.querySelector('[data-config="health_status_display"]');
+		if (statusDisplay) statusDisplay.disabled = !enabled;
 	}
 
 	_initializeSectionOrder() {
