@@ -18,7 +18,7 @@ HA Server Health Card automatically discovers supported entities, displays 24-ho
 
 - Global server health status with configurable visibility and Warning and Critical thresholds
 - Monitor Home Assistant, CPU, memory, disk, database, network, and storage
-- Track categorized updates and backup status
+- Track categorized updates, backup status, and backup destinations
 - 24-hour mini graphs with database and backup size variation alerts
 - Automatic discovery of supported Home Assistant entities
 - Collapsible and reorderable sections with user-specific preferences
@@ -28,7 +28,7 @@ HA Server Health Card automatically discovers supported entities, displays 24-ho
 
 - Home Assistant 2025.1 or newer recommended
 - [System Monitor](https://www.home-assistant.io/integrations/systemmonitor/) is recommended for CPU, memory, disk, uptime, IP address, network, and storage metrics
-- Backup entities are required for backup information
+- Backup entities are required for backup summary tiles. Destination details use Home Assistant Backup Manager data when available
 - Update entities are required for update information
 
 If System Monitor is unavailable or a sensor is disabled, the affected tile displays **Not available** or **Non disponible**.
@@ -114,7 +114,7 @@ section_order:
 | `show_network` | boolean | `true` | Shows detected network interfaces and throughput. |
 | `show_storage` | boolean | `true` | Shows detected storage volumes and usage. |
 | `show_updates` | boolean | `true` | Shows available update entities. |
-| `show_backups` | boolean | `true` | Shows backup status, size, dates, and schedule. |
+| `show_backups` | boolean | `true` | Shows backup status, size, dates, schedule, and per-destination details. |
 
 Sections can be reordered in the visual editor. When no user preference exists, all sections start collapsed.
 
@@ -204,7 +204,7 @@ Additional checks are enabled by default for:
 
 - Home Assistant Core updates
 - Home Assistant OS updates
-- Failed backups
+- Failed backups, including the affected destination when reported by Home Assistant
 
 ## 🏠 Home Assistant
 
@@ -258,13 +258,13 @@ Available updates are grouped into Home Assistant, Marketplace, Firmware, Apps, 
 
 ## 🗄️ Backups
 
-The Backups section displays backup status, latest backup details, size variation, and the next scheduled backup.
+The Backups section displays backup status, latest backup details, size variation, the next scheduled backup, and a summary for each destination reported by Home Assistant Backup Manager.
 
 | Light Theme | Dark Theme |
 | ----------- | ---------- |
-| <img width="505" height="169" alt="image" src="https://github.com/user-attachments/assets/6ea79313-f6ec-4106-8fbe-50cef0aa316d" /> | <img width="505" height="169" alt="image" src="https://github.com/user-attachments/assets/3b54e5d6-11ef-4ca2-a911-4a2e8209ad39" /> |
+| <img width="505" height="351" alt="image" src="https://github.com/user-attachments/assets/848644c3-11c9-404b-a157-7df0a632a4f9" /> | <img width="506" height="354" alt="image" src="https://github.com/user-attachments/assets/ac6279e6-feeb-4be2-af9a-accce4d8a567" /> |
 
-Backup size, backup-size variation from the previous successful backup, and the latest backup result can participate in global Health analysis.
+For each detected destination, the card displays the Home Assistant-provided name, number of available backups, latest backup date, latest backup size, and current success or failure state. Destinations can include **Local**, network storage, cloud storage, and third-party backup agents such as **Google Drive**.
 
 ## 🛠️ Troubleshooting
 
@@ -288,8 +288,11 @@ Backup size, backup-size variation from the previous successful backup, and the 
 
 ### Backup information is missing
 
-- Verify that Home Assistant backup entities are available
+- Verify that Home Assistant backup entities are available for the summary tiles
 - Run at least one successful backup so that size and date information exist
+- Open **Settings > System > Backups** and confirm that Home Assistant lists the expected destinations
+- Verify that the current Home Assistant user can access Backup Manager information
+- Reload the dashboard after adding or removing a destination; destination data is cached for up to five minutes
 
 ### Mini graphs are empty
 
