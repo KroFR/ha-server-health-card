@@ -1601,58 +1601,54 @@ class HaServerHealthCard extends HTMLElement {
 	}
 
 	async _loadSignedPictureUrl(path) {
-		if (
-			!path ||
-			this._signedPictureUrls.has(path) ||
-			this._signedPictureLoading.has(path)
-		) {
+		if (!path || this._signedPictureUrls.has(path) || this._signedPictureLoading.has(path)) return;
+
+		let parsedUrl;
+		try {
+			parsedUrl = new URL(path, window.location.origin);
+		} catch (_error) {
+			this._signedPictureUrls.set(path, null);
 			return;
 		}
 
-		// Full external URL: use directly
-		if (/^https?:\/\//i.test(path)) {
-			this._signedPictureUrls.set(path, path);
-			this._render();
+		const isAbsoluteUrl = /^[a-z][a-z0-9+.-]*:/i.test(path);
+		if (isAbsoluteUrl) {
+			const isSameOrigin = parsedUrl.origin === window.location.origin;
+			const isZigbee2MqttGitHubAsset = parsedUrl.hostname === "github.com"
+				&& (parsedUrl.pathname === "/Koenkk/zigbee2mqtt" || parsedUrl.pathname.startsWith("/Koenkk/zigbee2mqtt/"));
+			const trusted = parsedUrl.protocol === "https:" && (isSameOrigin || isZigbee2MqttGitHubAsset);
+			this._signedPictureUrls.set(path, trusted ? parsedUrl.href : null);
+			if (trusted) this._refreshDynamicContent(["updates"]);
 			return;
 		}
 
-		// Local Home Assistant path: signature required
-		if (!this._hass?.callWS) {
+		// Only absolute local Home Assistant paths are signed.
+		if (!path.startsWith("/") || !this._hass?.callWS) {
 			this._signedPictureUrls.set(path, null);
 			return;
 		}
 
 		this._signedPictureLoading.add(path);
-
 		try {
 			const response = await this._hass.callWS({
 				type: "auth/sign_path",
 				path,
 				expires: 3600,
 			});
-
-			const signedPath =
-				typeof response === "string"
-					? response
-					: response?.path;
-
-			const signedUrl = signedPath
-				? new URL(signedPath, window.location.origin).href
-				: null;
-
-			this._signedPictureUrls.set(path, signedUrl);
+			const signedPath = typeof response === "string" ? response : response?.path;
+			if (!signedPath) {
+				this._signedPictureUrls.set(path, null);
+				return;
+			}
+			const signedUrl = new URL(signedPath, window.location.origin);
+			this._signedPictureUrls.set(path, signedUrl.origin === window.location.origin ? signedUrl.href : null);
 		} catch (error) {
-			console.debug(
-				"[ha-server-health-card][update-picture] Unable to load image",
-				error
-			);
-
+			console.debug("[ha-server-health-card][update-picture] Unable to load image", error);
 			this._signedPictureUrls.set(path, null);
 		} finally {
 			this._signedPictureLoading.delete(path);
 		}
-
-		this._render();
+		this._refreshDynamicContent(["updates"]);
 	}
 
 	_renderUpdateRow(state) {
