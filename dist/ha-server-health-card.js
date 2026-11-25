@@ -1594,7 +1594,7 @@ class HaServerHealthCard extends HTMLElement {
 	_renderNetwork() {
 		const interfaces = this._systemMonitorNetworks();
 		const rows = interfaces.length
-			? interfaces.map(([name, values]) => `<div class="network-interface" data-network-interface="${this._escape(name)}"><div class="traffic-grid">${this._miniGraphTile("mdi:download", this._t("labels.download"), values.networkIn, { decimals: 1, tone: "green", kilobytesPerSecond: true })}${this._miniGraphTile("mdi:upload", this._t("labels.upload"), values.networkOut, { decimals: 1, tone: "blue", kilobytesPerSecond: true })}</div></div>`).join("")
+			? interfaces.map(([name, values]) => `<div class="network-interface" data-network-interface="${this._escape(name)}"><div class="traffic-grid">${this._miniGraphTile("mdi:download", `${this._t("labels.download")} (${this._escape(name)})`, values.networkIn, { decimals: 1, tone: "green", kilobytesPerSecond: true })}${this._miniGraphTile("mdi:upload", `${this._t("labels.upload")} (${this._escape(name)})`, values.networkOut, { decimals: 1, tone: "blue", kilobytesPerSecond: true })}</div></div>`).join("")
 			: `<div class="traffic-grid">${this._miniGraphTile("mdi:download", this._t("labels.download"), this._entities.networkIn, { decimals: 1, tone: "green", kilobytesPerSecond: true })}${this._miniGraphTile("mdi:upload", this._t("labels.upload"), this._entities.networkOut, { decimals: 1, tone: "blue", kilobytesPerSecond: true })}</div>`;
 		return this._renderSection("network", "mdi:lan", this._t("sections.network"), `<div class="network-interfaces">${rows}</div>`, this._sectionSummary("network"));
 	}
