@@ -28,6 +28,7 @@ const TRANSLATIONS = {
 		warning: "Warning",
 		critical: "Critical",
 		noIssues: "No issue detected",
+		updatesUpToDate: "All updates are installed",
 		healthDetails: "Health details",
 	},
 	sections: {
@@ -166,6 +167,7 @@ const TRANSLATIONS = {
 		warning: "Vigilance",
 		critical: "Critique",
 		noIssues: "Aucun problème détecté",
+		updatesUpToDate: "Toutes les mises à jour sont installées",
 		healthDetails: "Détails de santé",
 	},
 	sections: {
@@ -1655,7 +1657,7 @@ class HaServerHealthCard extends HTMLElement {
 			const items = classified.get(key);
 			if (!items?.length) return "";
 			return `<section class="update-group ${key}"><div class="update-group-head"><strong>${this._escape(label)}</strong><span>${items.length}</span></div><div class="update-group-list">${items.map((state) => this._renderUpdateRow(state)).join("")}</div></section>`;
-		}).join("") : `<div class="empty"><ha-icon icon="mdi:check-circle"></ha-icon>${this._t("card.noIssues")}</div>`;
+		}).join("") : `<div class="empty"><ha-icon icon="mdi:check-circle"></ha-icon>${this._t("card.updatesUpToDate")}</div>`;
 		const updateLevel = this._healthLevelFor("updates", updates.length);
 		const badge = updates.length ? `<b class="badge update-badge ${updateLevel || "healthy"}">${updates.length} ${this._t("labels.available")}</b>` : "";
 		return this._renderSection("updates", "mdi:package-up", this._t("sections.updates"), `<div class="updates">${rows}</div>`, badge);
