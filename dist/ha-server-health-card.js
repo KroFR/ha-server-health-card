@@ -47,6 +47,8 @@ const TRANSLATIONS = {
 		disk: "Disk",
 		database: "Database",
 		backupSizeHealth: "Backup size",
+		databaseVariationHealth: "Database size variation",
+		backupVariationHealth: "Backup size variation",
 		uptime: "Uptime",
 		ipv4: "IPv4 address",
 		download: "Download",
@@ -119,6 +121,7 @@ const TRANSLATIONS = {
 		healthAnalysis: "Health analysis",
 		healthAnalysisEnabled: "Enable health analysis",
 		healthThresholds: "Health thresholds",
+		healthVariationThresholds: "Variation thresholds",
 		warningThreshold: "Warning threshold",
 		criticalThreshold: "Critical threshold",
 		unavailableThreshold: "Unavailable entities threshold (%)",
@@ -186,6 +189,8 @@ const TRANSLATIONS = {
 		disk: "Disque",
 		database: "Base de données",
 		backupSizeHealth: "Taille de la sauvegarde",
+		databaseVariationHealth: "Variation de la base de données",
+		backupVariationHealth: "Variation de la sauvegarde",
 		uptime: "Disponibilité",
 		ipv4: "Adresse IPv4",
 		download: "Téléchargement",
@@ -258,6 +263,7 @@ const TRANSLATIONS = {
 		healthAnalysis: "Analyse de santé",
 		healthAnalysisEnabled: "Activer l’analyse de santé",
 		healthThresholds: "Seuils de santé",
+		healthVariationThresholds: "Seuils de variation",
 		warningThreshold: "Seuil de vigilance",
 		criticalThreshold: "Seuil Critique",
 		unavailableThreshold: "Seuil d’entités indisponibles (%)",
@@ -333,6 +339,10 @@ const DEFAULT_CONFIG = {
 	health_database_critical: 3000,
 	health_backup_size_warning: 1500,
 	health_backup_size_critical: 3000,
+	health_database_variation_warning: 25,
+	health_database_variation_critical: 50,
+	health_backup_variation_warning: 25,
+	health_backup_variation_critical: 50,
 	health_unavailable_warning: 5,
 	health_unavailable_critical: 15,
 	health_updates_warning: 10,
@@ -848,10 +858,12 @@ class HaServerHealthCard extends HTMLElement {
 			cpu: { warning: this._healthConfigNumber("health_cpu_warning", 90), critical: this._healthConfigNumber("health_cpu_critical", 98) },
 			memory: { warning: this._healthConfigNumber("health_memory_warning", 90), critical: this._healthConfigNumber("health_memory_critical", 98) },
 			disk: { warning: this._healthConfigNumber("health_disk_warning", 85), critical: this._healthConfigNumber("health_disk_critical", 95) },
-			database: { warning: this._healthConfigNumber("health_database_warning", 1000, 0, 1000000), critical: this._healthConfigNumber("health_database_critical", 1500, 0, 1000000) },
-			backupSize: { warning: this._healthConfigNumber("health_backup_size_warning", 1000, 0, 1000000), critical: this._healthConfigNumber("health_backup_size_critical", 1500, 0, 1000000) },
+			database: { warning: this._healthConfigNumber("health_database_warning", 1500, 0, 1000000), critical: this._healthConfigNumber("health_database_critical", 3000, 0, 1000000) },
+			backupSize: { warning: this._healthConfigNumber("health_backup_size_warning", 1500, 0, 1000000), critical: this._healthConfigNumber("health_backup_size_critical", 3000, 0, 1000000) },
+			databaseVariation: { warning: this._healthConfigNumber("health_database_variation_warning", 25, 0, 10000), critical: this._healthConfigNumber("health_database_variation_critical", 50, 0, 10000) },
+			backupVariation: { warning: this._healthConfigNumber("health_backup_variation_warning", 25, 0, 10000), critical: this._healthConfigNumber("health_backup_variation_critical", 50, 0, 10000) },
 			unavailableRatio: { warning: this._healthConfigNumber("health_unavailable_warning", 5) / 100, critical: this._healthConfigNumber("health_unavailable_critical", 15) / 100 },
-			updates: { warning: this._healthConfigNumber("health_updates_warning", 10, 0, 10000), critical: this._healthConfigNumber("health_updates_critical", 30, 0, 10000) },
+			updates: { warning: this._healthConfigNumber("health_updates_warning", 10, 0, 10000), critical: this._healthConfigNumber("health_updates_critical", 20, 0, 10000) },
 		};
 	}
 
@@ -902,6 +914,21 @@ class HaServerHealthCard extends HTMLElement {
 			const level = this._healthLevelFor(metric, value);
 			if (!level) continue;
 			issues.push({ metric, section, level, label, value: this._formatEntity(entityId, { decimals: 1 }) });
+		}
+		const databaseVariation = this._metricVariation24h(this._entities.database);
+		const databaseVariationPercent = Number.isFinite(databaseVariation?.percent) ? Math.abs(databaseVariation.percent) : null;
+		const databaseVariationLevel = this._healthLevelFor("databaseVariation", databaseVariationPercent);
+		if (databaseVariationLevel) {
+			const sign = databaseVariation.percent > 0 ? "+" : databaseVariation.percent < 0 ? "−" : "±";
+			const percent = new Intl.NumberFormat(this._language(), { maximumFractionDigits: 1 }).format(Math.abs(databaseVariation.percent));
+			issues.push({ metric: "databaseVariation", section: "system", level: databaseVariationLevel, label: this._t("labels.databaseVariationHealth"), value: `${sign}${percent}%` });
+		}
+		const backupVariationPercent = Number.isFinite(this._backupSizeHistory.percent) ? Math.abs(this._backupSizeHistory.percent) : null;
+		const backupVariationLevel = this._healthLevelFor("backupVariation", backupVariationPercent);
+		if (backupVariationLevel) {
+			const sign = this._backupSizeHistory.percent > 0 ? "+" : this._backupSizeHistory.percent < 0 ? "−" : "±";
+			const percent = new Intl.NumberFormat(this._language(), { maximumFractionDigits: 1 }).format(Math.abs(this._backupSizeHistory.percent));
+			issues.push({ metric: "backupVariation", section: "backups", level: backupVariationLevel, label: this._t("labels.backupVariationHealth"), value: `${sign}${percent}%` });
 		}
 
 		const counts = this._instanceCounts();
@@ -1366,6 +1393,7 @@ class HaServerHealthCard extends HTMLElement {
 			this._metricHistory = { key, loadedAt: Date.now(), loading: false, series: {} };
 		}
 		this._updateLiveMetrics();
+		this._refreshHero();
 	}
 
 	_metricVariation24h(entityId) {
@@ -1693,6 +1721,7 @@ class HaServerHealthCard extends HTMLElement {
 			this._backupSizeHistory = { key, loading: false, loadedAt: Date.now(), previous: null, delta: null, percent: null };
 		}
 		this._refreshDynamicContent(["backups"]);
+		this._refreshHero();
 	}
 	_formatBackupSizeVariation(entityId) {
 		const variation = this._backupSizeHistory;
@@ -2082,7 +2111,7 @@ class HaServerHealthCardEditor extends HTMLElement {
 	_render() {
 		if (!this._config) return;
 		this.innerHTML=`<style>
-			.editor{display:grid;gap:12px;padding:8px 0}details.section{overflow:hidden;background:var(--ha-card-background,var(--card-background-color));border:1px solid var(--divider-color);border-radius:var(--ha-card-border-radius,12px)}summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;color:var(--primary-text-color);font-size:16px;font-weight:600;cursor:pointer;list-style:none;user-select:none}summary::-webkit-details-marker{display:none}summary::after{content:"";width:8px;height:8px;border-right:2px solid var(--secondary-text-color);border-bottom:2px solid var(--secondary-text-color);transform:rotate(45deg);transition:transform .2s ease}details[open] summary::after{transform:rotate(225deg)}details[open] summary{border-bottom:1px solid var(--divider-color)}.section-title{display:flex;align-items:center;gap:10px}.section-title ha-icon{--mdc-icon-size:20px;color:var(--secondary-text-color)}.section-content{display:grid;gap:14px;padding:16px}.field,label{display:grid;min-width:0;gap:6px;color:var(--secondary-text-color);font-size:12px}input{box-sizing:border-box;width:100%;min-height:42px;padding:8px 10px;color:var(--primary-text-color);background:var(--ha-card-background,var(--card-background-color));border:1px solid var(--divider-color);border-radius:8px;font:inherit}input::placeholder{color:var(--secondary-text-color);opacity:.65}ha-selector{display:block;width:100%}.layout-options{display:grid;gap:4px;padding-bottom:10px;border-bottom:1px solid var(--divider-color)}.health-analysis-content{display:grid;gap:14px}.health-analysis-separator{height:1px;background:var(--divider-color)}.health-fields{display:grid;gap:14px}.health-fields.disabled{opacity:.45;pointer-events:none}.health-thresholds{display:grid;gap:8px}.health-thresholds-title{color:var(--primary-text-color);font-size:13px;font-weight:600}.health-thresholds-grid{display:grid;grid-template-columns:minmax(120px,1.4fr) repeat(2,minmax(86px,1fr));gap:8px 10px;align-items:end}.health-thresholds-head{color:var(--secondary-text-color);font-size:11px;font-weight:600;text-align:center}.health-metric-label{align-self:center;color:var(--primary-text-color);font-size:13px}.number-field{gap:5px}.health-thresholds-grid .number-field>span:first-child{display:none}.number-input-wrap{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px}.number-input-wrap input{min-width:0}.field-suffix{width:20px;color:var(--secondary-text-color);font-size:12px;text-align:left}.field-suffix.empty{visibility:hidden}.health-checks{display:grid;gap:4px;padding-top:10px;border-top:1px solid var(--divider-color)}.health-checks-title{margin-bottom:2px;color:var(--primary-text-color);font-size:13px;font-weight:600}.switch-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:42px}.switch-label{color:var(--primary-text-color);font-size:14px}.section-order-list{display:grid;gap:8px}.section-order-item{display:grid;overflow:hidden;border:1px solid var(--divider-color);border-radius:10px;background:var(--ha-card-background,var(--card-background-color));transition:border-color .16s ease,opacity .16s ease,transform .16s ease}.section-order-item.dragging{opacity:.45}.section-order-item.drag-over{border-color:var(--primary-color);transform:translateY(1px)}.section-order-row{display:grid;grid-template-columns:28px 24px minmax(0,1fr) auto 32px;align-items:center;gap:8px;min-height:48px;padding:5px 8px}.drag-handle{display:flex;align-items:center;justify-content:center;width:28px;height:34px;color:var(--secondary-text-color);cursor:grab;touch-action:none}.drag-handle:active{cursor:grabbing}.drag-handle ha-icon,.section-icon{--mdc-icon-size:18px}.section-icon{color:var(--secondary-text-color)}.section-label{min-width:0;overflow:hidden;color:var(--primary-text-color);font-size:14px;text-overflow:ellipsis;white-space:nowrap}.section-expand-spacer{width:32px}ha-switch{flex-shrink:0}@media(max-width:480px){.health-thresholds-grid{grid-template-columns:minmax(100px,1.25fr) repeat(2,minmax(72px,1fr));gap:7px}.number-input-wrap{gap:4px}}</style>
+			.editor{display:grid;gap:12px;padding:8px 0}details.section{overflow:hidden;background:var(--ha-card-background,var(--card-background-color));border:1px solid var(--divider-color);border-radius:var(--ha-card-border-radius,12px)}summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;color:var(--primary-text-color);font-size:16px;font-weight:600;cursor:pointer;list-style:none;user-select:none}summary::-webkit-details-marker{display:none}summary::after{content:"";width:8px;height:8px;border-right:2px solid var(--secondary-text-color);border-bottom:2px solid var(--secondary-text-color);transform:rotate(45deg);transition:transform .2s ease}details[open] summary::after{transform:rotate(225deg)}details[open] summary{border-bottom:1px solid var(--divider-color)}.section-title{display:flex;align-items:center;gap:10px}.section-title ha-icon{--mdc-icon-size:20px;color:var(--secondary-text-color)}.section-content{display:grid;gap:14px;padding:16px}.field,label{display:grid;min-width:0;gap:6px;color:var(--secondary-text-color);font-size:12px}input{box-sizing:border-box;width:100%;min-height:42px;padding:8px 10px;color:var(--primary-text-color);background:var(--ha-card-background,var(--card-background-color));border:1px solid var(--divider-color);border-radius:8px;font:inherit}input::placeholder{color:var(--secondary-text-color);opacity:.65}ha-selector{display:block;width:100%}.layout-options{display:grid;gap:4px;padding-bottom:10px;border-bottom:1px solid var(--divider-color)}.health-analysis-content{display:grid;gap:14px}.health-analysis-separator{height:1px;background:var(--divider-color)}.health-fields{display:grid;gap:14px}.health-fields.disabled{opacity:.45;pointer-events:none}.health-thresholds{display:grid;gap:8px}.variation-thresholds{padding-top:12px;border-top:1px solid var(--divider-color)}.health-thresholds-title{color:var(--primary-text-color);font-size:13px;font-weight:600}.health-thresholds-grid{display:grid;grid-template-columns:minmax(120px,1.4fr) repeat(2,minmax(86px,1fr));gap:8px 10px;align-items:end}.health-thresholds-head{color:var(--secondary-text-color);font-size:11px;font-weight:600;text-align:center}.health-metric-label{align-self:center;color:var(--primary-text-color);font-size:13px}.number-field{gap:5px}.health-thresholds-grid .number-field>span:first-child{display:none}.number-input-wrap{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px}.number-input-wrap input{min-width:0}.field-suffix{width:20px;color:var(--secondary-text-color);font-size:12px;text-align:left}.field-suffix.empty{visibility:hidden}.health-checks{display:grid;gap:4px;padding-top:10px;border-top:1px solid var(--divider-color)}.health-checks-title{margin-bottom:2px;color:var(--primary-text-color);font-size:13px;font-weight:600}.switch-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:42px}.switch-label{color:var(--primary-text-color);font-size:14px}.section-order-list{display:grid;gap:8px}.section-order-item{display:grid;overflow:hidden;border:1px solid var(--divider-color);border-radius:10px;background:var(--ha-card-background,var(--card-background-color));transition:border-color .16s ease,opacity .16s ease,transform .16s ease}.section-order-item.dragging{opacity:.45}.section-order-item.drag-over{border-color:var(--primary-color);transform:translateY(1px)}.section-order-row{display:grid;grid-template-columns:28px 24px minmax(0,1fr) auto 32px;align-items:center;gap:8px;min-height:48px;padding:5px 8px}.drag-handle{display:flex;align-items:center;justify-content:center;width:28px;height:34px;color:var(--secondary-text-color);cursor:grab;touch-action:none}.drag-handle:active{cursor:grabbing}.drag-handle ha-icon,.section-icon{--mdc-icon-size:18px}.section-icon{color:var(--secondary-text-color)}.section-label{min-width:0;overflow:hidden;color:var(--primary-text-color);font-size:14px;text-overflow:ellipsis;white-space:nowrap}.section-expand-spacer{width:32px}ha-switch{flex-shrink:0}@media(max-width:480px){.health-thresholds-grid{grid-template-columns:minmax(100px,1.25fr) repeat(2,minmax(72px,1fr));gap:7px}.number-input-wrap{gap:4px}}</style>
 		<div class="editor"><details class="section">${this._sectionSummary(HaServerHealthCardEditor.SECTION_ICONS.general,this._t("editor.general"))}<div class="section-content">
 		<label>${this._t("editor.title")}<input data-config="title" type="text" placeholder="${this._escape(this._t("card.title"))}"></label>
 		<label>${this._t("editor.subtitle")}<input data-config="subtitle" type="text" placeholder="${this._escape(this._t("card.subtitle"))}"></label>
@@ -2101,6 +2130,11 @@ class HaServerHealthCardEditor extends HTMLElement {
 		<div class="health-metric-label">${this._t("labels.backupSizeHealth")}</div>${this._numberField("health_backup_size_warning","",{suffix:"MB",maximum:1000000})}${this._numberField("health_backup_size_critical","",{suffix:"MB",maximum:1000000})}
 		<div class="health-metric-label">${this._t("labels.availableUpdates")}</div>${this._numberField("health_updates_warning","",{maximum:10000})}${this._numberField("health_updates_critical","",{maximum:10000})}
 		<div class="health-metric-label">${this._t("labels.unavailableRatio")}</div>${this._numberField("health_unavailable_warning","",{suffix:"%",step:0.1})}${this._numberField("health_unavailable_critical","",{suffix:"%",step:0.1})}
+		</div></div>
+		<div class="health-thresholds variation-thresholds"><div class="health-thresholds-title">${this._t("editor.healthVariationThresholds")}</div><div class="health-thresholds-grid">
+		<div></div><div class="health-thresholds-head">${this._t("editor.warningThreshold")}</div><div class="health-thresholds-head">${this._t("editor.criticalThreshold")}</div>
+		<div class="health-metric-label">${this._t("labels.database")}</div>${this._numberField("health_database_variation_warning","",{suffix:"%",maximum:10000,step:0.1})}${this._numberField("health_database_variation_critical","",{suffix:"%",maximum:10000,step:0.1})}
+		<div class="health-metric-label">${this._t("labels.backupSizeHealth")}</div>${this._numberField("health_backup_variation_warning","",{suffix:"%",maximum:10000,step:0.1})}${this._numberField("health_backup_variation_critical","",{suffix:"%",maximum:10000,step:0.1})}
 		</div></div>
 		<div class="health-checks"><div class="health-checks-title">${this._t("editor.platformChecks")}</div>${this._switchRow("health_check_core_update",this._t("editor.checkHaCoreUpdate"))}${this._switchRow("health_check_os_update",this._t("editor.checkHaOsUpdate"))}${this._switchRow("health_check_backup",this._t("editor.checkBackupFailure"))}</div>
 		</div></div></details></div>`;
