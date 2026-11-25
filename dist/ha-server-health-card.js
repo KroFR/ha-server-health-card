@@ -6,7 +6,7 @@
  * License: MIT
  */
 
-const CARD_VERSION = "2026.11.3";
+const CARD_VERSION = "2026.11.4";
 
 /* ---------------------------------------------------------------------- */
 /*  Languages                                                             */
@@ -103,6 +103,10 @@ const TRANSLATIONS = {
 		issues: "Issues",
 		usedOf: "{used} used of {total}",
 		freeSpace: "{free} free",
+		backupLocations: "Backup locations",
+		backupCount: "{count} backups",
+		backupLatest: "Latest: {date}",
+		backupProtected: "Encrypted",
 	},
 	editor: {
 		title: "Card title",
@@ -250,6 +254,10 @@ const TRANSLATIONS = {
 		issues: "Problèmes",
 		usedOf: "{used} utilisés sur {total}",
 		freeSpace: "{free} libres",
+		backupLocations: "Emplacements de sauvegarde",
+		backupCount: "{count} sauvegardes",
+		backupLatest: "Dernière : {date}",
+		backupProtected: "Chiffrée",
 	},
 	editor: {
 		title: "Titre de la carte",
@@ -398,6 +406,7 @@ class HaServerHealthCard extends HTMLElement {
 		this._localeSignature = "";
 		this._translationLanguage = "";
 		this._backupSizeHistory = { key: "", loading: false, loadedAt: 0, previous: null, delta: null, percent: null };
+		this._backupManager = { loading: false, loadedAt: 0, backups: [], agents: [], error: null };
 	}
 
 	static getConfigElement() {
@@ -440,6 +449,7 @@ class HaServerHealthCard extends HTMLElement {
 		setTimeout(() => {
 			this._loadMetricHistory();
 			this._loadFrontendCounts();
+			this._loadBackupManager();
 		}, 0);
 		if (firstUpdate || translationLanguageChanged || !this._initialized || !this.shadowRoot.querySelector("ha-card")) {
 			this._initialized = true;
@@ -844,6 +854,62 @@ class HaServerHealthCard extends HTMLElement {
 		this._refreshDynamicContent(["home-assistant", "storage", "updates"]);
 	}
 
+	async _loadBackupManager() {
+		if (!this._hass?.callWS || this._backupManager.loading) return;
+		if (this._backupManager.loadedAt && Date.now() - this._backupManager.loadedAt < 300000) return;
+		this._backupManager = { ...this._backupManager, loading: true };
+		try {
+			const [info, agentInfo] = await Promise.all([
+				this._hass.callWS({ type: "backup/info" }),
+				this._hass.callWS({ type: "backup/agents/info" }),
+			]);
+			this._backupManager = {
+				loading: false,
+				loadedAt: Date.now(),
+				backups: Array.isArray(info?.backups) ? info.backups : [],
+				agents: Array.isArray(agentInfo?.agents) ? agentInfo.agents : [],
+				error: null,
+			};
+		} catch (error) {
+			console.debug("[ha-server-health-card][backups] Unable to load backup locations", error);
+			this._backupManager = { ...this._backupManager, loading: false, loadedAt: Date.now(), error };
+		}
+		this._refreshDynamicContent(["backups"]);
+		this._refreshHero();
+	}
+	_backupAgentStats() {
+		const backups = this._backupManager.backups || [];
+		const knownAgents = new Map((this._backupManager.agents || []).map((agent) => [agent.agent_id, agent.name || agent.agent_id]));
+		const stats = new Map();
+		for (const backup of backups) {
+			const failedIds = new Set(backup?.failed_agent_ids || []);
+			for (const [agentId, details] of Object.entries(backup?.agents || {})) {
+				const current = stats.get(agentId) || { id: agentId, name: knownAgents.get(agentId) || agentId, count: 0, latest: null, size: null, protected: false, failed: false };
+				current.count += 1;
+				const timestamp = Date.parse(backup?.date);
+				if (!current.latest || (Number.isFinite(timestamp) && timestamp > current.latest.timestamp)) {
+					current.latest = { date: backup.date, timestamp: Number.isFinite(timestamp) ? timestamp : 0 };
+					current.size = Number.isFinite(Number(details?.size)) ? Number(details.size) : null;
+					current.protected = details?.protected === true;
+					current.failed = failedIds.has(agentId);
+				}
+				stats.set(agentId, current);
+			}
+			for (const agentId of failedIds) {
+				const current = stats.get(agentId) || { id: agentId, name: knownAgents.get(agentId) || agentId, count: 0, latest: null, size: null, protected: false, failed: true };
+				current.failed = true;
+				stats.set(agentId, current);
+			}
+		}
+		return [...stats.values()].sort((left, right) => left.name.localeCompare(right.name));
+	}
+	_latestFailedBackupAgents() {
+		const backups = [...(this._backupManager.backups || [])].sort((left, right) => Date.parse(right?.date || 0) - Date.parse(left?.date || 0));
+		const latest = backups[0];
+		if (!latest) return [];
+		const names = new Map((this._backupManager.agents || []).map((agent) => [agent.agent_id, agent.name || agent.agent_id]));
+		return (latest.failed_agent_ids || []).map((id) => names.get(id) || id);
+	}
 	_backupHealth() {
 		const raw = String(this._stateValue(this._entities.backupStatus, "") || "").trim().toLowerCase();
 		if (!raw) return { failed: false, known: false, label: this._t("common.notAvailable") };
@@ -980,8 +1046,11 @@ class HaServerHealthCard extends HTMLElement {
 			});
 		}
 
+		const failedBackupAgents = this._latestFailedBackupAgents();
 		const backup = this._backupHealth();
-		if (this._config?.health_check_backup !== false && backup.failed) {
+		if (this._config?.health_check_backup !== false && failedBackupAgents.length) {
+			for (const name of failedBackupAgents) issues.push({ metric: `backup:${name}`, section: "backups", level: "warning", label: name, value: this._t("labels.backupFailed") });
+		} else if (this._config?.health_check_backup !== false && backup.failed) {
 			issues.push({ metric: "backup", section: "backups", level: "warning", label: this._t("labels.backupStatus"), value: this._t("labels.backupFailed") });
 		}
 		return issues;
@@ -1069,7 +1138,7 @@ class HaServerHealthCard extends HTMLElement {
 		]);
 		if (id === "storage") return JSON.stringify(Object.values(this._hass?.states || {}).filter((state) => /disk|swap/.test(state.entity_id)).map((state) => [state.entity_id, state.state, state.last_updated]));
 		if (id === "updates") return JSON.stringify(this._availableUpdates().map((state) => this._stateSignature(state.entity_id)));
-		if (id === "backups") return JSON.stringify([this._stateSignature(e.backupStatus), this._stateSignature(e.lastBackupSize), this._stateSignature(e.lastBackup), this._stateSignature(e.nextBackup), this._localePreferencesSignature()]);
+		if (id === "backups") return JSON.stringify([this._stateSignature(e.backupStatus), this._stateSignature(e.lastBackupSize), this._stateSignature(e.lastBackup), this._stateSignature(e.nextBackup), this._localePreferencesSignature(), this._backupManager.loadedAt]);
 		return "";
 	}
 
@@ -1191,7 +1260,8 @@ class HaServerHealthCard extends HTMLElement {
 		}
 		if (id === "backups") {
 			const backup = this._backupHealth();
-			const size = this._formatEntity(this._entities.lastBackupSize, { decimals: 1 });
+			const backupSizeBytes = this._dataSizeToBytes(this._state(this._entities.lastBackupSize));
+			const size = Number.isFinite(backupSizeBytes) ? this._formatBytes(backupSizeBytes) : this._t("common.notAvailable");
 			const statusClass = backup.failed ? "failed" : backup.known ? "ok" : "unknown";
 			const statusLabel = backup.failed ? this._t("labels.backupFailed") : backup.known ? this._t("labels.backupOk") : this._t("common.unknown");
 			const sizeLevel = this._metricHealthLevel("backupSize");
@@ -1731,14 +1801,17 @@ class HaServerHealthCard extends HTMLElement {
 		this._refreshDynamicContent(["backups"]);
 		this._refreshHero();
 	}
+
 	_formatBackupSizeVariation(entityId) {
 		const variation = this._backupSizeHistory;
 		if (variation.key !== this._backupSizeHistoryKey(entityId) || !Number.isFinite(variation.delta)) return "";
-		const unit = this._state(entityId)?.attributes?.unit_of_measurement || "";
+		const state = this._state(entityId);
+		const deltaBytes = this._dataSizeToBytes({ state: String(Math.abs(variation.delta)), attributes: { unit_of_measurement: state?.attributes?.unit_of_measurement || "B" } });
+		if (!Number.isFinite(deltaBytes)) return "";
 		const sign = variation.delta > 0 ? "+" : variation.delta < 0 ? "−" : "±";
-		const absolute = new Intl.NumberFormat(this._language(), { maximumFractionDigits: 1 }).format(Math.abs(variation.delta));
-		return `${sign}${absolute}${unit ? ` ${unit}` : ""}`;
+		return `${sign}${this._formatBytes(deltaBytes)}`;
 	}
+
 	_backupSizeVariationTooltip(entityId) {
 		const variation = this._backupSizeHistory;
 		if (variation.key !== this._backupSizeHistoryKey(entityId) || !Number.isFinite(variation.percent)) return "";
@@ -1747,16 +1820,33 @@ class HaServerHealthCard extends HTMLElement {
 		return this._t("labels.backupSizeChange").replace("{percent}", `${sign}${percent}`);
 	}
 
+	_renderBackupLocations() {
+		const agents = this._backupAgentStats();
+		if (!agents.length) return "";
+		const rows = agents.map((agent) => {
+			const date = agent.latest?.date ? this._formatDateValue(agent.latest.date) : this._t("common.notAvailable");
+			const count = this._t("labels.backupCount").replace("{count}", new Intl.NumberFormat(this._language()).format(agent.count));
+			const latest = this._t("labels.backupLatest").replace("{date}", date);
+			const size = Number.isFinite(agent.size) ? this._formatBytes(agent.size) : this._t("common.notAvailable");
+			const statusClass = agent.failed ? "failed" : "ok";
+			const status = agent.failed ? this._t("labels.backupFailed") : this._t("labels.backupOk");
+			const icon = agent.id === "hassio.local" ? "mdi:harddisk" : "mdi:cloud-check-outline";
+			return `<div class="backup-agent ${statusClass}"><ha-icon icon="${icon}"></ha-icon><div class="backup-agent-main"><strong>${this._escape(agent.name)}</strong><small>${this._escape(count)} · ${this._escape(latest)}</small></div><div class="backup-agent-side"><span>${this._escape(size)}</span><b class="backup-result-pill ${statusClass}">${this._escape(status)}</b></div></div>`;
+		}).join("");
+		return `<div class="backup-locations"><div class="instance-group-title">${this._t("labels.backupLocations")}</div><div class="backup-agent-list">${rows}</div></div>`;
+	}
+
 	_renderBackups() {
 		const sizeEntity = this._entities.lastBackupSize;
 		if (sizeEntity) setTimeout(() => this._loadBackupSizeVariation(sizeEntity), 0);
-		const sizeValue = this._formatEntity(sizeEntity, { decimals: 1 });
+		const sizeBytes = this._dataSizeToBytes(this._state(sizeEntity));
+		const sizeValue = Number.isFinite(sizeBytes) ? this._formatBytes(sizeBytes) : this._t("common.notAvailable");
 		const delta = this._formatBackupSizeVariation(sizeEntity);
 		const tooltip = this._backupSizeVariationTooltip(sizeEntity);
 		const attributes = sizeEntity ? ` role="button" tabindex="0" data-more-info="${this._escape(sizeEntity)}"` : "";
 		const sizeLevel = this._metricHealthLevel("backupSize");
 		const sizeTile = `<div class="info backup-size ${sizeLevel}"${attributes}><ha-icon icon="mdi:database-arrow-down"></ha-icon><div><span>${this._t("labels.backupSize")}</span><strong>${this._escape(sizeValue)}</strong>${delta ? `<small class="backup-size-delta"${tooltip ? ` title="${this._escape(tooltip)}"` : ""}>${this._escape(delta)}</small>` : ""}</div></div>`;
-		return this._renderSection("backups", "mdi:backup-restore", this._t("sections.backups"), `<div class="backup-grid"><div class="backup-state"${this._entities.backupStatus ? ` role="button" tabindex="0" data-more-info="${this._escape(this._entities.backupStatus)}"` : ""}><ha-icon icon="mdi:database-check"></ha-icon><div><span>${this._t("labels.backupStatus")}</span><strong>${this._formatEntity(this._entities.backupStatus)}</strong></div></div>${sizeTile}${this._backupDateTile("mdi:history", this._t("labels.lastBackup"), this._entities.lastBackup, "past")}${this._backupDateTile("mdi:calendar-clock", this._t("labels.nextBackup"), this._entities.nextBackup, "future")}</div>`, this._sectionSummary("backups"));
+		return this._renderSection("backups", "mdi:backup-restore", this._t("sections.backups"), `<div class="backup-grid"><div class="backup-state"${this._entities.backupStatus ? ` role="button" tabindex="0" data-more-info="${this._escape(this._entities.backupStatus)}"` : ""}><ha-icon icon="mdi:database-check"></ha-icon><div><span>${this._t("labels.backupStatus")}</span><strong>${this._formatEntity(this._entities.backupStatus)}</strong></div></div>${sizeTile}${this._backupDateTile("mdi:history", this._t("labels.lastBackup"), this._entities.lastBackup, "past")}${this._backupDateTile("mdi:calendar-clock", this._t("labels.nextBackup"), this._entities.nextBackup, "future")}</div>${this._renderBackupLocations()}`, this._sectionSummary("backups"));
 	}
 
 
@@ -2004,7 +2094,19 @@ class HaServerHealthCard extends HTMLElement {
 			.storage-volume.warning .storage-meter i { background:var(--orange); } .storage-volume.warning .storage-percent { color:var(--orange); }
 			.storage-volume.critical .storage-meter i { background:var(--red); } .storage-volume.critical .storage-percent { color:var(--red); }
 			.empty { display:flex; justify-content:center; align-items:center; gap:6px; padding:12px; color:var(--green); font-size:11px; }
-			.backup-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; } .backup-state { display:flex; align-items:center; gap:9px; padding:10px; border:1px solid var(--divider-color); border-radius:10px; color:var(--primary-text-color); background:var(--ha-server-tile-background); } .backup-state ha-icon { color:var(--primary-color); --mdc-icon-size:24px; } .backup-grid .info { align-items:flex-start; border:1px solid var(--divider-color); } .backup-grid .backup-size.warning { border-color:var(--orange); } .backup-grid .backup-size.critical { border-color:var(--red); } .backup-grid [data-more-info],.backup-state[role="button"] { cursor:pointer; } .backup-state span,.backup-state strong { display:block; } .backup-state span { color:var(--secondary-text-color); font-size:var(--sh-font-small); line-height:1.1; } .backup-state strong { margin-top:2px; color:var(--primary-text-color); font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); line-height:1.15; } .backup-grid .info > div { min-width:0; } .backup-grid .info span { color:var(--secondary-text-color); font-size:var(--sh-font-small); line-height:1.1; } .backup-grid .info strong { margin-top:2px; overflow:hidden; color:var(--primary-text-color); font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); line-height:1.15; text-overflow:ellipsis; white-space:nowrap; } .backup-date-tile small { display:block; margin-top:3px; overflow:hidden; color:var(--secondary-text-color); font-size:var(--sh-font-small); font-weight:400; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; } .backup-size-delta { display:block; margin-top:3px; overflow:hidden; color:var(--secondary-text-color); font-size:var(--sh-font-small); font-weight:400; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; cursor:help; }
+			.backup-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+			.backup-locations { margin-top:9px; padding:9px 10px 4px; border:1px solid var(--divider-color); border-radius:10px; background:var(--ha-server-tile-background); }
+			.backup-agent-list { display:grid; }
+			.backup-agent { display:grid; grid-template-columns:22px minmax(0,1fr) auto; align-items:center; gap:8px; min-width:0; padding:8px 0; border-bottom:1px solid var(--divider-color); }
+			.backup-agent:last-child { border-bottom:0; }
+			.backup-agent > ha-icon { color:var(--primary-color); --mdc-icon-size:20px; }
+			.backup-agent.failed > ha-icon { color:var(--red); }
+			.backup-agent-main { min-width:0; }
+			.backup-agent-main strong,.backup-agent-main small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+			.backup-agent-main strong { color:var(--primary-text-color); font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); }
+			.backup-agent-main small { margin-top:3px; color:var(--secondary-text-color); font-size:var(--sh-font-small); }
+			.backup-agent-side { display:flex; align-items:center; gap:8px; white-space:nowrap; }
+			.backup-agent-side > span { color:var(--primary-text-color); font-size:var(--sh-font-small); font-weight:var(--sh-weight-medium); } .backup-state { display:flex; align-items:center; gap:9px; padding:10px; border:1px solid var(--divider-color); border-radius:10px; color:var(--primary-text-color); background:var(--ha-server-tile-background); } .backup-state ha-icon { color:var(--primary-color); --mdc-icon-size:24px; } .backup-grid .info { align-items:flex-start; border:1px solid var(--divider-color); } .backup-grid .backup-size.warning { border-color:var(--orange); } .backup-grid .backup-size.critical { border-color:var(--red); } .backup-grid [data-more-info],.backup-state[role="button"] { cursor:pointer; } .backup-state span,.backup-state strong { display:block; } .backup-state span { color:var(--secondary-text-color); font-size:var(--sh-font-small); line-height:1.1; } .backup-state strong { margin-top:2px; color:var(--primary-text-color); font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); line-height:1.15; } .backup-grid .info > div { min-width:0; } .backup-grid .info span { color:var(--secondary-text-color); font-size:var(--sh-font-small); line-height:1.1; } .backup-grid .info strong { margin-top:2px; overflow:hidden; color:var(--primary-text-color); font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); line-height:1.15; text-overflow:ellipsis; white-space:nowrap; } .backup-date-tile small { display:block; margin-top:3px; overflow:hidden; color:var(--secondary-text-color); font-size:var(--sh-font-small); font-weight:400; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; } .backup-size-delta { display:block; margin-top:3px; overflow:hidden; color:var(--secondary-text-color); font-size:var(--sh-font-small); font-weight:400; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; cursor:help; }
 			@media (max-width:420px) { .section-summary { max-width:48vw; } .update-meta { flex-wrap:wrap; gap:2px 8px; } .update-version { flex-basis:100%; } }
 			@media (max-width:350px) { .hero-row { grid-template-columns:38px minmax(0,1fr); } .resource-grid,.version-grid,.system-info-grid,.info-grid,.traffic-grid,.health-grid,.backup-grid { grid-template-columns:1fr; } }
 		`;
