@@ -12,11 +12,11 @@ HA Server Health Card automatically discovers supported entities, displays 24-ho
 
 | Light Theme | Dark Theme |
 | ----------- | ---------- |
-| <img width="504" height="598" alt="image" src="https://github.com/user-attachments/assets/82c0019a-61c6-4292-ab2d-0ad015227464" /> | <img width="506" height="601" alt="image" src="https://github.com/user-attachments/assets/e60c713c-2aac-43a4-bb1d-8f678cf75dbf" /> |
+| <img width="502" height="704" alt="image" src="https://github.com/user-attachments/assets/02c796b3-b1cf-46f2-a905-f3cf9a51a568" /> | <img width="505" height="707" alt="image" src="https://github.com/user-attachments/assets/26639317-bb0d-4087-82d2-6b4cdc881c25" /> |
 
 ## ✨ Features
 
-- Global server health status with configurable Warning and Critical thresholds
+- Global server health status with configurable visibility and Warning and Critical thresholds
 - Monitor Home Assistant, CPU, memory, disk, database, network, and storage
 - Track categorized updates and backup status
 - 24-hour mini graphs with database and backup size variation alerts
@@ -125,6 +125,7 @@ All numeric Health options accept zero or positive values. Percentage thresholds
 | Option | Type | Default | Unit | Description |
 |---|---|---:|---|---|
 | `health_analysis_enabled` | boolean | `true` | — | Enables the global Health status, issue list, threshold coloring, and Health checks. |
+| `health_status_display` | string | `always` | — | Controls Health status visibility: `always`, `problems` (only when at least one issue is detected), or `never`. Health analysis remains active unless `health_analysis_enabled` is disabled. |
 | `health_cpu_warning` | number | `90` | `%` | CPU Warning threshold. |
 | `health_cpu_critical` | number | `98` | `%` | CPU Critical threshold. |
 | `health_memory_warning` | number | `90` | `%` | Memory Warning threshold. |
@@ -183,7 +184,7 @@ The global Health bar summarizes the current server state:
 - **Warning**: at least one Warning threshold is reached
 - **Critical**: at least one Critical threshold is reached
 
-Select the Health bar to display the detected issues. Its open or closed state is saved per Home Assistant user.
+Select the Health bar to display the detected issues. Its open or closed state is saved per Home Assistant user. Use `health_status_display` to show the bar always, only when an issue is detected, or never. Hiding the bar does not disable Health analysis, threshold coloring, or configured checks.
 
 #### Default thresholds
 
