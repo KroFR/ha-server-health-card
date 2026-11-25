@@ -6,7 +6,7 @@
  * License: MIT
  */
 
-const CARD_VERSION = "2026.11.1";
+const CARD_VERSION = "2026.11.2";
 
 /* ---------------------------------------------------------------------- */
 /*  Languages                                                             */
@@ -75,6 +75,11 @@ const TRANSLATIONS = {
 		updateTypeMarketplace: "Marketplace",
 		updateTypeApplication: "Application",
 		updateTypeFirmware: "Firmware",
+		updateGroupHomeAssistant: "Home Assistant",
+		updateGroupMarketplace: "Marketplace",
+		updateGroupFirmware: "Firmware",
+		updateGroupApps: "Apps",
+		updateGroupOthers: "Others",
 		lastBackup: "Last successful backup",
 		nextBackup: "Next backup",
 		backupStatus: "Manager status",
@@ -208,6 +213,11 @@ const TRANSLATIONS = {
 		updateTypeMarketplace: "Marketplace",
 		updateTypeApplication: "Application",
 		updateTypeFirmware: "Firmware",
+		updateGroupHomeAssistant: "Home Assistant",
+		updateGroupMarketplace: "Marketplace",
+		updateGroupFirmware: "Firmware",
+		updateGroupApps: "Apps",
+		updateGroupOthers: "Autres",
 		lastBackup: "Dernière sauvegarde réussie",
 		nextBackup: "Prochaine sauvegarde",
 		backupStatus: "État du gestionnaire",
@@ -781,9 +791,18 @@ class HaServerHealthCard extends HTMLElement {
 			const enabledEntityIds = new Set([...entityIds].filter((entityId) => !disabledEntityIds.has(entityId)));
 			const addons = supervisor?.data?.addons ?? supervisor?.addons ?? supervisor?.data ?? supervisor;
 			const marketplaceInstalledEntities = registryEntities.filter((entry) => {
-				if (!entry?.entity_id?.startsWith("update.") || String(entry?.platform || "").toLowerCase() !== "marketplace") return false;
+				if (!entry?.entity_id?.startsWith("update.")) return false;
 				const state = this._hass?.states?.[entry.entity_id];
-				return state?.attributes?.installed_version != null;
+				if (state?.attributes?.installed_version == null) return false;
+				const platform = String(entry.platform || "").toLowerCase();
+				const entityId = String(entry.entity_id || "").toLowerCase();
+				const name = `${state.attributes?.title || ""} ${state.attributes?.friendly_name || ""}`.toLowerCase();
+				const category = String(state.attributes?.category || state.attributes?.update_category || "").toLowerCase();
+				return platform === "marketplace"
+					|| platform === "hacs"
+					|| category === "marketplace"
+					|| category === "plugin"
+					|| /(?:^|[._-])hacs(?:[._-]|$)|marketplace|custom[ _-]?(?:component|card)|plugin/.test(`${entityId} ${name}`);
 			});
 			this._marketplaceUpdateEntities = new Set(marketplaceInstalledEntities.map((entry) => entry.entity_id));
 			this._registryCounts = {
@@ -805,7 +824,7 @@ class HaServerHealthCard extends HTMLElement {
 			this._registryLoadedAt = Date.now();
 			this._registrySourceSignature = `${Object.keys(this._hass?.entities || {}).length}|${Object.keys(this._hass?.devices || {}).length}`;
 		}
-		this._refreshDynamicContent(["home-assistant", "storage"]);
+		this._refreshDynamicContent(["home-assistant", "storage", "updates"]);
 	}
 
 	_backupHealth() {
@@ -1534,13 +1553,21 @@ class HaServerHealthCard extends HTMLElement {
 		return this._renderSection("network", "mdi:lan", this._t("sections.network"), `<div class="network-interfaces">${rows}</div>`, this._sectionSummary("network"));
 	}
 
-	_updateType(state) {
+	_updateMetadata(state) {
 		const deviceClass = String(state.attributes?.device_class || "").toLowerCase();
 		const entityId = state.entity_id.toLowerCase();
 		const name = `${state.attributes?.title || ""} ${state.attributes?.friendly_name || ""}`.toLowerCase();
-		if (deviceClass === "firmware") return { icon: "mdi:chip", label: this._t("labels.updateTypeFirmware") };
-		if (/addon|add_on|zigbee2mqtt|mosquitto|studio code|terminal|ssh|matter server|thread border router|esphome/.test(`${entityId} ${name}`)) return { icon: "mdi:docker", label: this._t("labels.updateTypeApplication") };
-		return { icon: "mdi:package-up", label: this._t("labels.updateTypeMarketplace") };
+		const haystack = `${entityId} ${name}`;
+		if (/^update\.home_assistant_(?:core|supervisor|operating_system)(?:_|$)/.test(entityId)) return { category: "home-assistant", icon: "mdi:home-assistant", label: this._t("labels.updateGroupHomeAssistant") };
+		if (deviceClass === "firmware") return { category: "firmware", icon: "mdi:chip", label: this._t("labels.updateTypeFirmware") };
+		if (/addon|add_on|zigbee2mqtt|mosquitto|studio code|terminal|ssh|matter server|thread border router|esphome/.test(haystack)) return { category: "apps", icon: "mdi:docker", label: this._t("labels.updateTypeApplication") };
+		if (this._marketplaceUpdateEntities.has(state.entity_id)) return { category: "marketplace", icon: "mdi:package-up", label: this._t("labels.updateTypeMarketplace") };
+		return { category: "others", icon: "mdi:package-up", label: this._t("labels.updateGroupOthers") };
+	}
+
+	_updateType(state) {
+		const metadata = this._updateMetadata(state);
+		return { icon: metadata.icon, label: metadata.label };
 	}
 
 	async _loadSignedPictureUrl(path) {
@@ -1598,25 +1625,39 @@ class HaServerHealthCard extends HTMLElement {
 		this._render();
 	}
 
+	_renderUpdateRow(state) {
+		const picture = state.attributes.entity_picture;
+		if (picture && !this._signedPictureUrls.has(picture)) this._loadSignedPictureUrl(picture);
+		const pictureUrl = picture ? this._signedPictureUrls.get(picture) : null;
+		const metadata = this._updateMetadata(state);
+		const icon = state.attributes.icon || (metadata.category === "marketplace" ? "mdi:view-grid" : metadata.icon) || "mdi:view-grid";
+		const visual = pictureUrl ? `<img class="update-picture" src="${this._escape(pictureUrl)}" alt="">` : `<ha-icon icon="${icon}"></ha-icon>`;
+		const name = this._escape(state.attributes.title || state.attributes.friendly_name || state.entity_id);
+		const installed = this._escape(state.attributes.installed_version || "--");
+		const latest = this._escape(state.attributes.latest_version || "--");
+		return `<div class="update-row"><button type="button" class="update-info" data-more-info="${state.entity_id}">${visual}<span><strong>${name}</strong><small class="update-meta"><span class="update-type"><ha-icon icon="${metadata.icon}"></ha-icon>${this._escape(metadata.label)}</span><span class="update-version"><b>${installed}</b><ha-icon icon="mdi:arrow-right"></ha-icon><b>${latest}</b></span></small></span></button><button type="button" class="update-action" data-more-info="${state.entity_id}">${this._t("labels.update")}</button></div>`;
+	}
+
 	_renderUpdates(updates) {
-		const rows = updates.length ? updates.map((state) => {
-			const picture = state.attributes.entity_picture;
-			if (picture && !this._signedPictureUrls.has(picture)) this._loadSignedPictureUrl(picture);
-			const pictureUrl = picture ? this._signedPictureUrls.get(picture) : null;
-			const icon = state.attributes.icon || "mdi:view-grid";
-			const visual = pictureUrl
-				? `<img class="update-picture" src="${this._escape(pictureUrl)}" alt="">`
-				: `<ha-icon icon="${icon}"></ha-icon>`;
-			const name = this._escape(state.attributes.title || state.attributes.friendly_name || state.entity_id);
-			const installed = this._escape(state.attributes.installed_version || "--");
-			const latest = this._escape(state.attributes.latest_version || "--");
-			const updateType = this._updateType(state);
-			return `<div class="update-row"><button type="button" class="update-info" data-more-info="${state.entity_id}">${visual}<span><strong>${name}</strong><small class="update-meta"><span class="update-type"><ha-icon icon="${updateType.icon}"></ha-icon>${this._escape(updateType.label)}</span><span class="update-version"><b>${installed}</b><ha-icon icon="mdi:arrow-right"></ha-icon><b>${latest}</b></span></small></span></button><button type="button" class="update-action" data-more-info="${state.entity_id}">${this._t("labels.update")}</button></div>`;
+		const groups = [
+			["home-assistant", this._t("labels.updateGroupHomeAssistant")],
+			["marketplace", this._t("labels.updateGroupMarketplace")],
+			["firmware", this._t("labels.updateGroupFirmware")],
+			["apps", this._t("labels.updateGroupApps")],
+			["others", this._t("labels.updateGroupOthers")],
+		];
+		const classified = new Map(groups.map(([key]) => [key, []]));
+		for (const state of updates) {
+			const category = this._updateMetadata(state).category;
+			(classified.get(category) || classified.get("others")).push(state);
+		}
+		const rows = updates.length ? groups.map(([key, label]) => {
+			const items = classified.get(key);
+			if (!items?.length) return "";
+			return `<section class="update-group ${key}"><div class="update-group-head"><strong>${this._escape(label)}</strong><span>${items.length}</span></div><div class="update-group-list">${items.map((state) => this._renderUpdateRow(state)).join("")}</div></section>`;
 		}).join("") : `<div class="empty"><ha-icon icon="mdi:check-circle"></ha-icon>${this._t("card.noIssues")}</div>`;
 		const updateLevel = this._healthLevelFor("updates", updates.length);
-		const badge = updates.length
-			? `<b class="badge update-badge ${updateLevel || "healthy"}">${updates.length} ${this._t("labels.available")}</b>`
-			: "";
+		const badge = updates.length ? `<b class="badge update-badge ${updateLevel || "healthy"}">${updates.length} ${this._t("labels.available")}</b>` : "";
 		return this._renderSection("updates", "mdi:package-up", this._t("sections.updates"), `<div class="updates">${rows}</div>`, badge);
 	}
 
@@ -1909,7 +1950,7 @@ class HaServerHealthCard extends HTMLElement {
 			.info ha-icon,.traffic ha-icon,.health-item ha-icon { flex:0 0 auto; --mdc-icon-size:21px; } .info div,.traffic div,.health-item div { min-width:0; } .info span,.traffic span,.health-item span { display:block; color:var(--secondary-text-color); font-size:9px; } .info strong,.traffic strong,.health-item strong { display:block; margin-top:2px; color:var(--primary-text-color); font-size:12px; overflow:hidden; text-overflow:ellipsis; }
 			.info.ipv4 { overflow:visible; } .info.ipv4 > div { flex:1 1 0; min-width:0; overflow:visible; } .info.ipv4 strong { display:block; width:max-content; max-width:none; overflow:visible; text-overflow:clip; white-space:nowrap; font-size:12px; line-height:1.2; }
 			.disk { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px 10px; padding:10px; border-radius:10px; background:var(--ha-server-tile-background); } .disk small { display:block; margin-top:2px; color:var(--secondary-text-color); font-size:9px; overflow:hidden; text-overflow:ellipsis; } .disk .meter { grid-column:1/-1; margin-top:0; }
-			.updates { display:grid; } .update-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; padding:7px 2px; border-bottom:1px solid var(--divider-color); } .update-row:last-child { border-bottom:0; } .update-info { display:grid; grid-template-columns:22px minmax(0,1fr); align-items:center; gap:8px; min-width:0; padding:0; border:0; color:var(--primary-text-color); background:transparent; font:inherit; text-align:left; cursor:pointer; } .update-info > ha-icon { color:var(--secondary-text-color); --mdc-icon-size:20px; } .update-picture { width:20px; height:20px; object-fit:contain; border-radius:4px; } .update-info strong,.update-info small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .update-info strong { font-size:11px; } .update-info small { margin-top:4px; color:var(--secondary-text-color); font-size:10px; line-height:1.4; } .update-meta { display:flex !important; align-items:center; gap:10px; min-width:0; } .update-type,.update-version { display:inline-flex; align-items:center; gap:5px; min-width:0; } .update-type { flex:0 0 auto; color:var(--secondary-text-color); font-size:10px; font-weight:500; } .update-type ha-icon { --mdc-icon-size:13px; } .update-version { overflow:hidden; color:var(--primary-text-color); font-size:11px; } .update-version b { font-weight:600; white-space:nowrap; } .update-version b:last-child { font-weight:700; } .update-version ha-icon { flex:0 0 auto; color:var(--secondary-text-color); --mdc-icon-size:16px; } .update-action { min-width:58px; padding:5px 9px; border:0; border-radius:10px; color:var(--primary-color); background:color-mix(in srgb,var(--primary-color) 14%,transparent); font:inherit; font-size:10px; font-weight:700; cursor:pointer; } .update-action:hover { background:color-mix(in srgb,var(--primary-color) 22%,transparent); }
+			.updates { display:grid; gap:12px; } .update-group { display:grid; gap:3px; } .update-group + .update-group { padding-top:10px; border-top:1px solid var(--divider-color); } .update-group-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:0 2px 3px; } .update-group-head strong { color:var(--secondary-text-color); font-size:9px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; } .update-group-head span { display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; min-width:18px; height:18px; padding:0 5px; border-radius:999px; color:var(--secondary-text-color); background:color-mix(in srgb,var(--secondary-text-color) 11%,transparent); font-size:9px; font-weight:600; } .update-group-list { display:grid; } .update-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; padding:7px 2px; border-bottom:1px solid var(--divider-color); } .update-row:last-child { border-bottom:0; } .update-info { display:grid; grid-template-columns:22px minmax(0,1fr); align-items:center; gap:8px; min-width:0; padding:0; border:0; color:var(--primary-text-color); background:transparent; font:inherit; text-align:left; cursor:pointer; } .update-info > ha-icon { color:var(--secondary-text-color); --mdc-icon-size:20px; } .update-picture { width:20px; height:20px; object-fit:contain; border-radius:4px; } .update-info strong,.update-info small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .update-info strong { font-size:11px; } .update-info small { margin-top:4px; color:var(--secondary-text-color); font-size:10px; line-height:1.4; } .update-meta { display:flex !important; align-items:center; gap:10px; min-width:0; } .update-type,.update-version { display:inline-flex; align-items:center; gap:5px; min-width:0; } .update-type { flex:0 0 auto; color:var(--secondary-text-color); font-size:10px; font-weight:500; } .update-type ha-icon { --mdc-icon-size:13px; } .update-version { overflow:hidden; color:var(--primary-text-color); font-size:11px; } .update-version b { font-weight:600; white-space:nowrap; } .update-version b:last-child { font-weight:700; } .update-version ha-icon { flex:0 0 auto; color:var(--secondary-text-color); --mdc-icon-size:16px; } .update-action { min-width:58px; padding:5px 9px; border:0; border-radius:10px; color:var(--primary-color); background:color-mix(in srgb,var(--primary-color) 14%,transparent); font:inherit; font-size:10px; font-weight:700; cursor:pointer; } .update-action:hover { background:color-mix(in srgb,var(--primary-color) 22%,transparent); }
 			.badge,.backup-result-pill { display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; min-width:18px; min-height:18px; padding:2px 5px; border-radius:999px; font-size:10px; font-weight:400; line-height:14px; text-align:center; white-space:nowrap; } .badge { color:var(--blue); background:color-mix(in srgb,var(--blue) 12%,transparent); }
 			.update-badge.healthy { color:var(--green); background:color-mix(in srgb,var(--green) 14%,transparent); } .update-badge.warning { color:var(--orange); background:color-mix(in srgb,var(--orange) 14%,transparent); } .update-badge.critical { color:var(--red); background:color-mix(in srgb,var(--red) 14%,transparent); }
 			.storage-list { display:grid; gap:5px; }
