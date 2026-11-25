@@ -244,7 +244,7 @@ The Updates section lists update entities that currently report an available upd
 
 | Light Theme | Dark Theme |
 | ----------- | ---------- |
-| <img width="503" height="402" alt="image" src="https://github.com/user-attachments/assets/0b69235e-fe85-433a-ab11-2c97dd57af07" /> | <img width="505" height="405" alt="image" src="https://github.com/user-attachments/assets/dc77602e-5803-48e2-8385-9b3c815ab13f" /> |
+| <img width="503" height="476" alt="image" src="https://github.com/user-attachments/assets/0dced77e-e247-4a5b-ae76-42ef1cd112bf" /> | <img width="506" height="476" alt="image" src="https://github.com/user-attachments/assets/9a100de0-3957-4518-afc3-41e928d22897" /> |
 
 The number of available updates can participate in global Health analysis.
 
