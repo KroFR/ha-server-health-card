@@ -1,0 +1,5 @@
+* text=auto
+*.js text eol=lf
+dist/ha-server-health-card.js linguist-vendored=false
+dist/ha-server-health-card.js linguist-generated=false
+dist/ha-server-health-card.js linguist-detectable=true
