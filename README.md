@@ -18,8 +18,8 @@ HA Server Health Card automatically discovers supported entities, displays 24-ho
 
 - Global server health status with configurable Warning and Critical thresholds
 - Monitor Home Assistant, CPU, memory, disk, database, network, and storage
-- Track available updates and backup status
-- 24-hour mini graphs and database-size variation
+- Track categorized updates and backup status
+- 24-hour mini graphs with database and backup size variation alerts
 - Automatic discovery of supported Home Assistant entities
 - Collapsible and reorderable sections with user-specific preferences
 - Visual editor, English and French localization, and responsive light/dark themes
@@ -135,6 +135,10 @@ All numeric Health options accept zero or positive values. Percentage thresholds
 | `health_database_critical` | number | `3000` | `MB` | Database-size Critical threshold. |
 | `health_backup_size_warning` | number | `1500` | `MB` | Latest-backup-size Warning threshold. |
 | `health_backup_size_critical` | number | `3000` | `MB` | Latest-backup-size Critical threshold. |
+| `health_database_variation_warning` | number | `25` | `%` | Warning threshold for the absolute database-size change over the last 24 hours. |
+| `health_database_variation_critical` | number | `50` | `%` | Critical threshold for the absolute database-size change over the last 24 hours. |
+| `health_backup_variation_warning` | number | `25` | `%` | Warning threshold for the absolute size change from the previous successful backup. |
+| `health_backup_variation_critical` | number | `50` | `%` | Critical threshold for the absolute size change from the previous successful backup. |
 | `health_unavailable_warning` | number | `5` | `%` | Warning threshold for unavailable entities divided by total entities. |
 | `health_unavailable_critical` | number | `15` | `%` | Critical threshold for unavailable entities divided by total entities. |
 | `health_updates_warning` | number | `10` | updates | Available-update Warning threshold. |
@@ -144,6 +148,8 @@ All numeric Health options accept zero or positive values. Percentage thresholds
 | `health_check_backup` | boolean | `true` | — | Adds a Warning issue when the latest backup status indicates a failure. |
 
 Warning is reached when the measured value is greater than or equal to the Warning threshold. Critical takes priority when the Critical threshold is reached.
+
+Database variation compares the current database size with its earliest available value in the last 24 hours. Backup variation compares the latest successful backup size with the previous distinct value found in up to 30 days of history. Both checks use the absolute percentage change, so a `+30%` increase and a `-30%` decrease trigger the same Warning threshold. Variation checks are evaluated only when enough Recorder history is available.
 
 #### Entity overrides
 
@@ -181,16 +187,17 @@ Select the Health bar to display the detected issues. Its open or closed state i
 
 #### Default thresholds
 
-<table>
-<tr><th>Metric</th><th>Warning</th><th>Critical</th></tr>
-<tr><td>CPU</td><td>90%</td><td>98%</td></tr>
-<tr><td>Memory</td><td>90%</td><td>98%</td></tr>
-<tr><td>Disk</td><td>85%</td><td>95%</td></tr>
-<tr><td>Database size</td><td>1500 MB</td><td>3000 MB</td></tr>
-<tr><td>Backup size</td><td>1500 MB</td><td>3000 MB</td></tr>
-<tr><td>Unavailable entities</td><td>5%</td><td>15%</td></tr>
-<tr><td>Available updates</td><td>10</td><td>20</td></tr>
-</table>
+| Metric | Warning | Critical |
+|---|---:|---:|
+| CPU | 90% | 98% |
+| Memory | 90% | 98% |
+| Disk | 85% | 95% |
+| Database size | 1500 MB | 3000 MB |
+| Backup size | 1500 MB | 3000 MB |
+| Database size variation (24 h) | ±25% | ±50% |
+| Backup size variation | ±25% | ±50% |
+| Unavailable entities | 5% | 15% |
+| Available updates | 10 | 20 |
 
 Additional checks are enabled by default for:
 
@@ -216,7 +223,7 @@ The System section displays CPU, memory and disk usage, IPv4 address, Home Assis
 | ----------- | ---------- |
 | <img width="504" height="178" alt="image" src="https://github.com/user-attachments/assets/17d02233-0ff7-46a5-bd75-4da50e2a2ef7" /> | <img width="504" height="175" alt="image" src="https://github.com/user-attachments/assets/bffefc0f-0473-485d-aa4f-1b0ce875ef9e" /> |
 
-CPU, memory, disk, and database tiles use 24-hour history when available. The Database tile also displays the size change over the last 24 hours.
+CPU, memory, disk, and database tiles use 24-hour history when available. The Database tile displays its size change over the last 24 hours, and the absolute percentage variation can trigger Health Warning or Critical alerts.
 
 ## 🌐 Network
 
@@ -246,7 +253,7 @@ The Updates section lists update entities that currently report an available upd
 | ----------- | ---------- |
 | <img width="503" height="476" alt="image" src="https://github.com/user-attachments/assets/0dced77e-e247-4a5b-ae76-42ef1cd112bf" /> | <img width="506" height="476" alt="image" src="https://github.com/user-attachments/assets/9a100de0-3957-4518-afc3-41e928d22897" /> |
 
-The number of available updates can participate in global Health analysis.
+Available updates are grouped into Home Assistant, Marketplace, Firmware, Apps, and Others. Empty groups are hidden, each visible group shows its item count, and a dedicated **All updates are installed** message is displayed when no updates remain. The total number of available updates can participate in global Health analysis.
 
 ## 🗄️ Backups
 
@@ -256,7 +263,7 @@ The Backups section displays backup status, latest backup details, size variatio
 | ----------- | ---------- |
 | <img width="505" height="169" alt="image" src="https://github.com/user-attachments/assets/6ea79313-f6ec-4106-8fbe-50cef0aa316d" /> | <img width="505" height="169" alt="image" src="https://github.com/user-attachments/assets/3b54e5d6-11ef-4ca2-a911-4a2e8209ad39" /> |
 
-Backup size and the latest backup result can participate in global Health analysis.
+Backup size, backup-size variation from the previous successful backup, and the latest backup result can participate in global Health analysis.
 
 ## 🛠️ Troubleshooting
 
@@ -288,6 +295,13 @@ Backup size and the latest backup result can participate in global Health analys
 - Check that the entity is recorded by Home Assistant Recorder
 - Wait for enough state history to accumulate
 - Verify that history access is available to the current user
+
+### Database or backup variation alerts do not appear
+
+- Verify that Home Assistant Recorder stores the database-size and backup-size entities
+- Database variation requires usable history from the last 24 hours
+- Backup variation requires a previous distinct backup-size value from up to 30 days of history
+- Variation alerts evaluate both increases and decreases using the absolute percentage change
 
 ### Unavailable entities briefly show no Health issue
 
