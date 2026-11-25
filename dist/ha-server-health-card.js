@@ -514,6 +514,7 @@ class HaServerHealthCard extends HTMLElement {
 		const registrySource = this._entityRegistry.length ? this._entityRegistry : this._hass?.entities;
 		if (this._discoveryRegistry === registrySource && this._discoveryResult && (this._entityRegistry.length || this._discoveryStates === states)) return this._discoveryResult;
 		const result = { networks: {}, disks: {} };
+		const devicesById = new Map(this._deviceRegistry.map((device) => [device.id, device]));
 		const scalarKeys = {
 			processor_use: "cpu", memory_use_percent: "memory", last_boot: "uptime", uptime: "uptime",
 		};
@@ -541,7 +542,7 @@ class HaServerHealthCard extends HTMLElement {
 				}
 			}
 			if (entry.entity_id.startsWith("sensor.")) {
-				const device = this._deviceRegistry.find((item) => item.id === entry.device_id);
+				const device = devicesById.get(entry.device_id);
 				const haystack = `${device?.name || ""} ${device?.name_by_user || ""} ${entry.entity_id} ${state.attributes?.friendly_name || ""}`.toLowerCase();
 				const isDataSize = state.attributes?.state_class === "measurement" && state.attributes?.device_class === "data_size";
 				const isDatabase = String(state.attributes?.engine || "").toLowerCase() === "sqlite"
@@ -552,7 +553,7 @@ class HaServerHealthCard extends HTMLElement {
 				if (key === "backup_manager_state") result.backupStatus ??= entry.entity_id;
 				if (key === "last_successful_automatic_backup") result.lastBackup ??= entry.entity_id;
 				if (key === "next_scheduled_automatic_backup") result.nextBackup ??= entry.entity_id;
-				const device = this._deviceRegistry.find((item) => item.id === entry.device_id);
+				const device = devicesById.get(entry.device_id);
 				const isBackupDevice = /backup|sauvegarde/i.test(`${device?.name || ""} ${device?.name_by_user || ""}`);
 				const isBackupSize = state.attributes?.state_class === "measurement" && state.attributes?.device_class === "data_size";
 				if (isBackupSize && (key === "last_successful_automatic_backup_size" || isBackupDevice)) result.lastBackupSize ??= entry.entity_id;
@@ -704,13 +705,6 @@ class HaServerHealthCard extends HTMLElement {
 	}
 
 
-	_countUnavailableEntities() {
-		if (!this._hass?.states) {
-			return 0;
-		}
-
-		return Object.values(this._hass.states).filter((state) => state.state === "unavailable").length;
-	}
 
 	_availableUpdates() {
 		if (!this._hass?.states) {
@@ -1595,10 +1589,6 @@ class HaServerHealthCard extends HTMLElement {
 		return { category: "others", icon: "mdi:package-up", label: this._t("labels.updateGroupOthers") };
 	}
 
-	_updateType(state) {
-		const metadata = this._updateMetadata(state);
-		return { icon: metadata.icon, label: metadata.label };
-	}
 
 	async _loadSignedPictureUrl(path) {
 		if (!path || this._signedPictureUrls.has(path) || this._signedPictureLoading.has(path)) return;
