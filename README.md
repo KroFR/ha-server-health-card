@@ -10,16 +10,9 @@ A custom Lovelace card for [Home Assistant](https://www.home-assistant.io/) that
 
 HA Server Health Card automatically discovers supported entities, displays 24-hour trends, and calculates a global health status from configurable Warning and Critical thresholds.
 
-<table>
-<tr>
-<th>Light Theme</th>
-<th>Dark Theme</th>
-</tr>
-<tr>
-<td><img src="./img/readme-title-light.png" alt="HA Server Health Card in Light Theme"></td>
-<td><img src="./img/readme-title-dark.png" alt="HA Server Health Card in Dark Theme"></td>
-</tr>
-</table>
+| Light Theme | Dark Theme |
+| ----------- | ---------- |
+| <img width="504" height="598" alt="image" src="https://github.com/user-attachments/assets/82c0019a-61c6-4292-ab2d-0ad015227464" /> | <img width="506" height="601" alt="image" src="https://github.com/user-attachments/assets/e60c713c-2aac-43a4-bb1d-8f678cf75dbf" /> |
 
 ## ✨ Features
 
@@ -154,67 +147,23 @@ Additional checks are enabled by default for:
 - Home Assistant OS updates
 - Failed backups
 
-```yaml
-type: custom:ha-server-health-card
-health_analysis_enabled: true
-health_cpu_warning: 90
-health_cpu_critical: 98
-health_memory_warning: 90
-health_memory_critical: 98
-health_disk_warning: 85
-health_disk_critical: 95
-health_database_warning: 1500
-health_database_critical: 3000
-health_backup_size_warning: 1500
-health_backup_size_critical: 3000
-health_unavailable_warning: 5
-health_unavailable_critical: 15
-health_updates_warning: 10
-health_updates_critical: 20
-health_check_core_update: true
-health_check_os_update: true
-health_check_backup: true
-```
-
 ## 🏠 Home Assistant
 
 The Home Assistant section displays platform and registry information.
 
-### Versions
-
-- Home Assistant Core
-- Supervisor
-- Home Assistant OS
-
-Core and OS values are highlighted when an update is available.
-
-### Components
-
-- Devices
-- Automations
-- Helpers
-- Apps
-- Marketplace
-
-### Entities
-
-- Total entities
-- Enabled entities
-- Disabled entities
-- Unavailable entities
+| Light Theme | Dark Theme |
+| ----------- | ---------- |
+| <img width="503" height="255" alt="image" src="https://github.com/user-attachments/assets/ff7dcbbc-d89b-4d54-9864-f785ed8b5fba" /> | <img width="507" height="259" alt="image" src="https://github.com/user-attachments/assets/b3498155-7f58-42e5-bf4c-b6dcc4e5de07" /> |
 
 Unavailable-entity Health analysis waits for Home Assistant registry data before calculating the ratio. This avoids temporary alerts during dashboard loading.
 
 ## 🖥️ System
 
-The System section displays:
+The System section displays CPU, memory and disk usage, IPv4 address, Home Assistant database size, and uptime.
 
-- CPU usage
-- Memory usage
-- Disk usage
-- IPv4 address
-- Home Assistant database size
-- Uptime
+| Light Theme | Dark Theme |
+| ----------- | ---------- |
+| <img width="504" height="178" alt="image" src="https://github.com/user-attachments/assets/17d02233-0ff7-46a5-bd75-4da50e2a2ef7" /> | <img width="504" height="175" alt="image" src="https://github.com/user-attachments/assets/bffefc0f-0473-485d-aa4f-1b0ce875ef9e" /> |
 
 CPU, memory, disk, and database tiles use 24-hour history when available. The Database tile also displays the size change over the last 24 hours.
 
@@ -222,20 +171,19 @@ CPU, memory, disk, and database tiles use 24-hour history when available. The Da
 
 The card automatically discovers network sensors exposed by System Monitor and filters common virtual interfaces.
 
-- Download rate
-- Upload rate
-- 24-hour activity graphs
+| Light Theme | Dark Theme |
+| ----------- | ---------- |
+| <img width="504" height="109" alt="image" src="https://github.com/user-attachments/assets/eca49319-962b-4844-bd2c-de354e34d856" /> | <img width="504" height="110" alt="image" src="https://github.com/user-attachments/assets/d84f16b8-4264-465b-a3f4-39760620a23c" /> |
 
 Network speeds are normalized for display when compatible units are available.
 
 ## 💾 Storage
 
-Storage volumes are discovered from compatible disk sensors. Each volume shows:
+Storage volumes are automatically discovered from compatible disk sensors and display the mount point, used and total size, available free space, and usage percentage.
 
-- Mount point
-- Used and total size
-- Free space when available
-- Usage percentage
+| Light Theme | Dark Theme |
+| ----------- | ---------- |
+| <img width="503" height="151" alt="image" src="https://github.com/user-attachments/assets/07cdb94d-05e4-4b71-a848-ef89d997f7dc" /> | <img width="504" height="151" alt="image" src="https://github.com/user-attachments/assets/e14977f8-a6dc-4f28-be40-a935b769d105" /> |
 
 Disk Warning and Critical thresholds are applied to storage usage.
 
@@ -243,24 +191,19 @@ Disk Warning and Critical thresholds are applied to storage usage.
 
 The Updates section lists update entities that currently report an available update.
 
-Each item includes:
-
-- Component name
-- Update category
-- Installed version
-- Latest available version
+| Light Theme | Dark Theme |
+| ----------- | ---------- |
+| <img width="503" height="402" alt="image" src="https://github.com/user-attachments/assets/0b69235e-fe85-433a-ab11-2c97dd57af07" /> | <img width="505" height="405" alt="image" src="https://github.com/user-attachments/assets/dc77602e-5803-48e2-8385-9b3c815ab13f" /> |
 
 The number of available updates can participate in global Health analysis.
 
 ## 🗄️ Backups
 
-The Backups section displays:
+The Backups section displays backup status, latest backup details, size variation, and the next scheduled backup.
 
-- Backup Manager status
-- Latest successful backup size
-- Size variation from the previous backup
-- Latest successful backup date
-- Next scheduled backup
+| Light Theme | Dark Theme |
+| ----------- | ---------- |
+| <img width="505" height="169" alt="image" src="https://github.com/user-attachments/assets/6ea79313-f6ec-4106-8fbe-50cef0aa316d" /> | <img width="505" height="169" alt="image" src="https://github.com/user-attachments/assets/3b54e5d6-11ef-4ca2-a911-4a2e8209ad39" /> |
 
 Backup size and the latest backup result can participate in global Health analysis.
 
