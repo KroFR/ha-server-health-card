@@ -108,6 +108,9 @@ const TRANSLATIONS = {
 		backupCount: "{count} backups",
 		backupLatest: "Latest: {date}",
 		backupProtected: "Encrypted",
+		backupDetails: "Backups",
+		backupAutomatic: "Automatic",
+		backupAppUpdate: "App update",
 		databaseSize: "Database size",
 		databaseGrowth7d: "Growth · 7 days",
 		recorder: "Recorder",
@@ -267,6 +270,9 @@ const TRANSLATIONS = {
 		backupCount: "{count} sauvegardes",
 		backupLatest: "Dernière : {date}",
 		backupProtected: "Chiffrée",
+		backupDetails: "Sauvegardes",
+		backupAutomatic: "Automatique",
+		backupAppUpdate: "Mise à jour d’App",
 		databaseSize: "Taille de la base",
 		databaseGrowth7d: "Croissance · 7 jours",
 		recorder: "Recorder",
@@ -424,6 +430,7 @@ class HaServerHealthCard extends HTMLElement {
 		this._translationLanguage = "";
 		this._backupSizeHistory = { key: "", loading: false, loadedAt: 0, previous: null, delta: null, percent: null };
 		this._backupManager = { loading: false, loadedAt: 0, backups: [], agents: [], error: null };
+		this._backupDetailsOpen = false;
 		this._recorderInfo = { loading: false, loadedAt: 0, data: null };
 		this._databaseHistory7d = { key: "", loading: false, loadedAt: 0, points: [] };
 	}
@@ -1263,6 +1270,7 @@ class HaServerHealthCard extends HTMLElement {
 		if (currentSide && freshSide) currentSide.replaceChildren(...freshSide.childNodes);
 		this._bindMoreInfo(section);
 		this._bindNavigation(section);
+		this._bindBackupDetails(section);
 	}
 
 	_refreshHero() {
@@ -1979,6 +1987,41 @@ class HaServerHealthCard extends HTMLElement {
 		return this._t("labels.backupSizeChange").replace("{percent}", `${sign}${percent}`);
 	}
 
+	_backupRelativeDate(value) {
+		const timestamp = Date.parse(value);
+		if (!Number.isFinite(timestamp)) return this._t("common.notAvailable");
+		const hours = Math.max(0, Math.round((Date.now() - timestamp) / 3600000));
+		if (hours < 48) return this._t("labels.hoursAgo").replace("{hours}", new Intl.NumberFormat(this._language()).format(hours));
+		return this._formatDateValue(value);
+	}
+
+	_backupDisplaySize(backup) {
+		const sizes = Object.entries(backup?.agents || {}).map(([id, data]) => ({ id, size: Number(data?.size) })).filter((item) => Number.isFinite(item.size));
+		const local = sizes.find((item) => item.id === "hassio.local");
+		return this._formatBytes((local || sizes[0])?.size);
+	}
+
+	_backupTypeLabel(backup) {
+		if (backup?.extra_metadata?.["supervisor.addon_update"]) return this._t("labels.backupAppUpdate");
+		if (backup?.with_automatic_settings === true || backup?.extra_metadata?.with_automatic_settings === true) return this._t("labels.backupAutomatic");
+		return "";
+	}
+
+	_renderBackupDetails() {
+		const backups = [...(this._backupManager.backups || [])].sort((a, b) => Date.parse(b?.date || 0) - Date.parse(a?.date || 0));
+		if (!backups.length) return "";
+		const agentNames = new Map((this._backupManager.agents || []).map((agent) => [agent.agent_id, agent.name || agent.agent_id]));
+		const rows = backups.map((backup) => {
+			const failedIds = new Set(backup?.failed_agent_ids || []);
+			const destinations = Object.keys(backup?.agents || {}).map((id) => `<span class="backup-detail-destination ${failedIds.has(id) ? "failed" : ""}">${this._escape(agentNames.get(id) || id)}</span>`).join(", ");
+			const type = this._backupTypeLabel(backup);
+			const metadata = [this._backupRelativeDate(backup?.date), type, destinations].filter(Boolean).join(" · ");
+			const failed = failedIds.size || (backup?.failed_addons || []).length || (backup?.failed_folders || []).length;
+			return `<div class="backup-detail-row ${failed ? "failed" : ""}"><ha-icon icon="mdi:archive-outline"></ha-icon><div class="backup-detail-main"><strong>${this._escape(backup?.name || backup?.backup_id || this._t("labels.backupDetails"))}</strong><small>${metadata}</small></div><span class="backup-detail-size">${this._escape(this._backupDisplaySize(backup))}</span></div>`;
+		}).join("");
+		return `<div class="backup-details"><button type="button" class="backup-details-head" data-toggle-backup-details aria-expanded="${String(this._backupDetailsOpen)}"><span>${this._t("labels.backupDetails")}</span><b>${backups.length}</b><ha-icon icon="mdi:chevron-${this._backupDetailsOpen ? "up" : "down"}"></ha-icon></button><div class="backup-details-list"${this._backupDetailsOpen ? "" : " hidden"}>${rows}</div></div>`;
+	}
+
 	_renderBackupLocations() {
 		const agents = this._backupAgentStats();
 		if (!agents.length) return "";
@@ -2004,7 +2047,7 @@ class HaServerHealthCard extends HTMLElement {
 		const attributes = sizeEntity ? ` role="button" tabindex="0" data-more-info="${this._escape(sizeEntity)}"` : "";
 		const sizeLevel = this._metricHealthLevel("backupSize");
 		const sizeTile = `<div class="version-tile system-info-tile backup-size ${sizeLevel}"${attributes}><ha-icon icon="mdi:database-arrow-down"></ha-icon><span><small>${this._t("labels.backupSize")}</small><strong>${this._escape(sizeValue)}${delta ? ` · ${this._escape(delta)}` : ""}</strong></span></div>`;
-		return this._renderSection("backups", "mdi:backup-restore", this._t("sections.backups"), `<div class="backup-grid"><div class="version-tile system-info-tile backup-state"${this._entities.backupStatus ? ` role="button" tabindex="0" data-more-info="${this._escape(this._entities.backupStatus)}"` : ""}><ha-icon icon="mdi:database-check"></ha-icon><span><small>${this._t("labels.backupStatus")}</small><strong>${this._formatEntity(this._entities.backupStatus)}</strong></span></div>${sizeTile}${this._backupDateTile("mdi:history", this._t("labels.lastBackup"), this._entities.lastBackup, "past")}${this._backupDateTile("mdi:calendar-clock", this._t("labels.nextBackup"), this._entities.nextBackup, "future")}</div>${this._renderBackupLocations()}`, this._sectionSummary("backups"));
+		return this._renderSection("backups", "mdi:backup-restore", this._t("sections.backups"), `<div class="backup-grid"><div class="version-tile system-info-tile backup-state"${this._entities.backupStatus ? ` role="button" tabindex="0" data-more-info="${this._escape(this._entities.backupStatus)}"` : ""}><ha-icon icon="mdi:database-check"></ha-icon><span><small>${this._t("labels.backupStatus")}</small><strong>${this._formatEntity(this._entities.backupStatus)}</strong></span></div>${sizeTile}${this._backupDateTile("mdi:history", this._t("labels.lastBackup"), this._entities.lastBackup, "past")}${this._backupDateTile("mdi:calendar-clock", this._t("labels.nextBackup"), this._entities.nextBackup, "future")}</div>${this._renderBackupLocations()}${this._renderBackupDetails()}`, this._sectionSummary("backups"));
 	}
 
 
@@ -2045,6 +2088,19 @@ class HaServerHealthCard extends HTMLElement {
 		});
 	}
 
+	_bindBackupDetails(root = this.shadowRoot) {
+		root.querySelectorAll("[data-toggle-backup-details]").forEach((button) => {
+			button.addEventListener("click", () => {
+				this._backupDetailsOpen = !this._backupDetailsOpen;
+				const list = this.shadowRoot.querySelector(".backup-details-list");
+				if (list) list.hidden = !this._backupDetailsOpen;
+				button.setAttribute("aria-expanded", String(this._backupDetailsOpen));
+				const icon = button.querySelector("ha-icon");
+				if (icon) icon.setAttribute("icon", `mdi:chevron-${this._backupDetailsOpen ? "up" : "down"}`);
+			});
+		});
+	}
+
 	_bindEvents() {
 		this.shadowRoot.querySelectorAll("[data-toggle-section]").forEach((button) => {
 			button.addEventListener("click", () => this._toggleSection(button.dataset.toggleSection));
@@ -2052,6 +2108,7 @@ class HaServerHealthCard extends HTMLElement {
 		this._bindMoreInfo();
 		this._bindNavigation();
 		this._bindHealthDetails();
+		this._bindBackupDetails();
 	}
 
 	_applyCollapsedState() {
@@ -2266,6 +2323,12 @@ class HaServerHealthCard extends HTMLElement {
 			.backup-agent-main small { margin-top:3px; color:var(--secondary-text-color); font-size:var(--sh-font-small); }
 			.backup-agent-side { display:flex; align-items:center; gap:8px; white-space:nowrap; }
 			.backup-agent-side > span { color:var(--primary-text-color); font-size:var(--sh-font-small); font-weight:var(--sh-weight-medium); } .backup-state { cursor:default; } .backup-state ha-icon { color:var(--primary-color); } .backup-grid .backup-size.warning { border-color:var(--orange); } .backup-grid .backup-size.critical { border-color:var(--red); } .backup-grid [data-more-info],.backup-state[role="button"] { cursor:pointer; } .backup-date-tile em { color:var(--secondary-text-color); }
+			.backup-details { margin-top:9px; overflow:hidden; border:1px solid var(--divider-color); border-radius:10px; background:var(--ha-server-tile-background); }
+			.backup-details-head { display:grid; grid-template-columns:minmax(0,1fr) auto 18px; align-items:center; gap:7px; width:100%; padding:9px 10px; border:0; color:var(--primary-text-color); background:transparent; font:inherit; text-align:left; cursor:pointer; }
+			.backup-details-head span { font-size:var(--sh-font-small); font-weight:var(--sh-weight-medium); text-transform:uppercase; letter-spacing:.04em; } .backup-details-head b { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px; border-radius:999px; color:var(--secondary-text-color); background:color-mix(in srgb,var(--secondary-text-color) 11%,transparent); font-size:9px; font-weight:600; } .backup-details-head ha-icon { --mdc-icon-size:17px; color:var(--secondary-text-color); }
+			.backup-details-list { display:grid; border-top:1px solid var(--divider-color); } .backup-details-list[hidden] { display:none; }
+			.backup-detail-row { display:grid; grid-template-columns:34px minmax(0,1fr) auto; align-items:center; gap:9px; min-width:0; padding:8px 10px; border-bottom:1px solid var(--divider-color); } .backup-detail-row:last-child { border-bottom:0; } .backup-detail-row > ha-icon { display:grid; place-items:center; width:30px; height:30px; border-radius:50%; color:var(--secondary-text-color); background:color-mix(in srgb,var(--secondary-text-color) 12%,transparent); --mdc-icon-size:17px; } .backup-detail-row.failed > ha-icon { color:var(--red); }
+			.backup-detail-main { min-width:0; } .backup-detail-main strong,.backup-detail-main small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .backup-detail-main strong { color:var(--primary-text-color); font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); line-height:1.2; } .backup-detail-main small { margin-top:2px; color:var(--secondary-text-color); font-size:var(--sh-font-small); line-height:1.2; } .backup-detail-destination.failed { color:var(--red); } .backup-detail-size { padding:2px 6px; border-radius:999px; color:var(--primary-text-color); background:color-mix(in srgb,var(--secondary-text-color) 18%,transparent); font-size:10px; font-weight:600; white-space:nowrap; }
 			@media (max-width:420px) { .section-summary { max-width:48vw; } .update-meta { flex-wrap:wrap; gap:2px 8px; } .update-version { flex-basis:100%; } }
 			@media (max-width:350px) { .hero-row { grid-template-columns:38px minmax(0,1fr); } .resource-grid,.version-grid,.system-info-grid,.info-grid,.traffic-grid,.health-grid,.backup-grid,.database-grid { grid-template-columns:1fr; } }
 		`;
