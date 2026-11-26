@@ -2045,11 +2045,11 @@ class HaServerHealthCard extends HTMLElement {
 		const pictureUrl = picture ? this._signedPictureUrls.get(picture) : null;
 		const metadata = this._updateMetadata(state);
 		const icon = state.attributes.icon || (metadata.category === "marketplace" ? "mdi:view-grid" : metadata.icon) || "mdi:view-grid";
-		const visual = pictureUrl ? `<img class="update-picture" src="${this._escape(pictureUrl)}" alt="">` : `<ha-icon icon="${icon}"></ha-icon>`;
+		const visual = pictureUrl ? `<img class="update-picture" src="${this._escape(pictureUrl)}" alt="">` : `<ha-icon icon="${this._escape(icon)}"></ha-icon>`;
 		const name = this._escape(state.attributes.title || state.attributes.friendly_name || state.entity_id);
 		const installed = this._escape(state.attributes.installed_version || "--");
 		const latest = this._escape(state.attributes.latest_version || "--");
-		return `<div class="update-row"><button type="button" class="update-info" data-more-info="${state.entity_id}">${visual}<span><strong>${name}</strong><small class="update-meta"><span class="update-type"><ha-icon icon="${metadata.icon}"></ha-icon>${this._escape(metadata.label)}</span><span class="update-version"><b>${installed}</b><ha-icon icon="mdi:arrow-right"></ha-icon><b>${latest}</b></span></small></span></button><button type="button" class="update-action" data-more-info="${state.entity_id}"><ha-icon icon="mdi:package-down"></ha-icon><span>${this._t("labels.update")}</span></button></div>`;
+		return `<div class="update-row"><button type="button" class="update-info" data-more-info="${this._escape(state.entity_id)}">${visual}<span><strong>${name}</strong><small class="update-meta"><span class="update-type"><ha-icon icon="${this._escape(metadata.icon)}"></ha-icon>${this._escape(metadata.label)}</span><span class="update-version"><b>${installed}</b><ha-icon icon="mdi:arrow-right"></ha-icon><b>${latest}</b></span></small></span></button><button type="button" class="update-action" data-more-info="${this._escape(state.entity_id)}"><ha-icon icon="mdi:package-down"></ha-icon><span>${this._t("labels.update")}</span></button></div>`;
 	}
 
 	_renderUpdates(updates) {
@@ -2203,7 +2203,7 @@ class HaServerHealthCard extends HTMLElement {
 		const attributes = sizeEntity ? ` role="button" tabindex="0" data-more-info="${this._escape(sizeEntity)}"` : "";
 		const sizeLevel = this._metricHealthLevel("backupSize");
 		const sizeTile = `<div class="version-tile system-info-tile backup-size ${sizeLevel}"${attributes}><ha-icon icon="mdi:database-arrow-down"></ha-icon><span><small>${this._t("labels.backupSize")}</small><strong>${this._escape(sizeValue)}${delta ? ` · ${this._escape(delta)}` : ""}</strong></span></div>`;
-		return this._renderSection("backups", "mdi:backup-restore", this._t("sections.backups"), `<div class="backup-grid"><div class="version-tile system-info-tile backup-state"${this._entities.backupStatus ? ` role="button" tabindex="0" data-more-info="${this._escape(this._entities.backupStatus)}"` : ""}><ha-icon icon="mdi:database-check"></ha-icon><span><small>${this._t("labels.backupStatus")}</small><strong>${this._formatEntity(this._entities.backupStatus)}</strong></span></div>${sizeTile}${this._backupDateTile("mdi:history", this._t("labels.lastBackup"), this._entities.lastBackup, "past")}${this._backupDateTile("mdi:calendar-clock", this._t("labels.nextBackup"), this._entities.nextBackup, "future")}</div>${this._renderBackupLocations()}${this._renderBackupDetails()}`, this._sectionSummary("backups"));
+		return this._renderSection("backups", "mdi:backup-restore", this._t("sections.backups"), `<div class="backup-grid"><div class="version-tile system-info-tile backup-state"${this._entities.backupStatus ? ` role="button" tabindex="0" data-more-info="${this._escape(this._entities.backupStatus)}"` : ""}><ha-icon icon="mdi:database-check"></ha-icon><span><small>${this._t("labels.backupStatus")}</small><strong>${this._escape(this._formatEntity(this._entities.backupStatus))}</strong></span></div>${sizeTile}${this._backupDateTile("mdi:history", this._t("labels.lastBackup"), this._entities.lastBackup, "past")}${this._backupDateTile("mdi:calendar-clock", this._t("labels.nextBackup"), this._entities.nextBackup, "future")}</div>${this._renderBackupLocations()}${this._renderBackupDetails()}`, this._sectionSummary("backups"));
 	}
 
 
