@@ -238,7 +238,7 @@ The card automatically discovers network sensors exposed by System Monitor and f
 
 | Light Theme | Dark Theme |
 | ----------- | ---------- |
-| <img width="504" height="109" alt="image" src="https://github.com/user-attachments/assets/eca49319-962b-4844-bd2c-de354e34d856" /> | <img width="504" height="110" alt="image" src="https://github.com/user-attachments/assets/d84f16b8-4264-465b-a3f4-39760620a23c" /> |
+| <img width="503" height="111" alt="image" src="https://github.com/user-attachments/assets/86427618-672f-4320-80f3-56c5bda73da7" /> | <img width="503" height="108" alt="image" src="https://github.com/user-attachments/assets/16a3f2b1-bad1-4194-af35-ce5b123c0130" /> |
 
 Network speeds are normalized for display when compatible units are available.
 
@@ -251,6 +251,16 @@ Storage volumes are automatically discovered from compatible disk sensors and di
 | <img width="503" height="151" alt="image" src="https://github.com/user-attachments/assets/07cdb94d-05e4-4b71-a848-ef89d997f7dc" /> | <img width="504" height="151" alt="image" src="https://github.com/user-attachments/assets/e14977f8-a6dc-4f28-be40-a935b769d105" /> |
 
 Disk Warning and Critical thresholds are applied to storage usage.
+
+## 🗄️ Database
+
+The Database section provides detailed information about Home Assistant Recorder and database activity.
+
+| Light Theme | Dark Theme |
+| ----------- | ---------- |
+| <img width="502" height="160" alt="image" src="https://github.com/user-attachments/assets/9217c2b7-ef9d-4c35-92c3-dc92550499d3" /> | <img width="505" height="158" alt="image" src="https://github.com/user-attachments/assets/3564c16d-6c74-4980-963d-3a567f036179" /> |
+
+It displays the Recorder status, database size, pending backlog, and database growth over the last seven days. Database size history is also used to track variations and identify unusual growth.
 
 ## 🐳 Containers & Apps
 
