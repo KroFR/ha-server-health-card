@@ -41,6 +41,7 @@ const TRANSLATIONS = {
 		updates: "Updates",
 		backups: "Backups",
 		database: "Database",
+		containersApps: "Containers & Apps",
 	},
 	labels: {
 		cpu: "CPU",
@@ -119,8 +120,14 @@ const TRANSLATIONS = {
 		databaseGrowth7d: "Growth · 7 days",
 		recorder: "Recorder",
 		backlog: "Backlog",
-		running: "Healthy",
+		running: "Running",
 		notRunning: "Not running",
+		containers: "System containers",
+		containerApps: "Apps",
+		runningCount: "{running}/{total} Running",
+		stopped: "Stopped",
+		cpuShort: "CPU",
+		ramShort: "RAM",
 	},
 	editor: {
 		title: "Card title",
@@ -135,6 +142,7 @@ const TRANSLATIONS = {
 		showUpdates: "Show Updates",
 		showBackups: "Show Backups",
 		showDatabase: "Show Database",
+		showContainersApps: "Show Containers & Apps",
 		general: "General",
 		cardLayout: "Card layout",
 		healthAnalysis: "Health analysis",
@@ -207,6 +215,7 @@ const TRANSLATIONS = {
 		updates: "Mises à jour",
 		backups: "Sauvegardes",
 		database: "Base de données",
+		containersApps: "Conteneurs & Apps",
 	},
 	labels: {
 		cpu: "CPU",
@@ -285,8 +294,14 @@ const TRANSLATIONS = {
 		databaseGrowth7d: "Croissance · 7 jours",
 		recorder: "Recorder",
 		backlog: "File d’attente",
-		running: "Sain",
+		running: "En marche",
 		notRunning: "Arrêté",
+		containers: "Conteneurs système",
+		containerApps: "Apps",
+		runningCount: "{running}/{total} Actifs",
+		stopped: "Arrêté",
+		cpuShort: "CPU",
+		ramShort: "RAM",
 	},
 	editor: {
 		title: "Titre de la carte",
@@ -301,6 +316,7 @@ const TRANSLATIONS = {
 		showUpdates: "Afficher Mises à jour",
 		showBackups: "Afficher Sauvegardes",
 		showDatabase: "Afficher Base de données",
+		showContainersApps: "Afficher Conteneurs & Apps",
 		general: "Général",
 		cardLayout: "Disposition de la carte",
 		healthAnalysis: "Analyse de santé",
@@ -369,12 +385,13 @@ const DEFAULT_CONFIG = {
 	language: "auto",
 	show_icon: true,
 	show_header: true,
-	section_order: ["home-assistant", "system", "network", "storage", "database", "updates", "backups"],
+	section_order: ["home-assistant", "system", "network", "storage", "database", "containers-apps", "updates", "backups"],
 	show_home_assistant: true,
 	show_system: true,
 	show_network: true,
 	show_storage: true,
 	show_database: true,
+	show_containers_apps: true,
 	show_updates: true,
 	show_backups: true,
 	health_analysis_enabled: true,
@@ -441,6 +458,10 @@ class HaServerHealthCard extends HTMLElement {
 		this._backupDetailsOpen = false;
 		this._recorderInfo = { loading: false, loadedAt: 0, data: null };
 		this._databaseHistory7d = { key: "", loading: false, loadedAt: 0, points: [] };
+		this._containersApps = { infoLoading: false, statsLoading: false, infoLoadedAt: 0, statsLoadedAt: 0, systems: [], apps: [] };
+		this._containersAppsLoadPromise = null;
+		this._containersAppsRefreshTimer = null;
+		this._containerGroupsCollapsed = new Set(["systems", "apps"]);
 	}
 
 	static getConfigElement() {
@@ -487,6 +508,7 @@ class HaServerHealthCard extends HTMLElement {
 			this._loadRecorderInfo();
 			this._loadDatabaseHistory7d();
 		}, 0);
+		if (firstUpdate) this._startContainersAppsRefresh();
 		if (firstUpdate || translationLanguageChanged || !this._initialized || !this.shadowRoot.querySelector("ha-card")) {
 			this._initialized = true;
 			this._render();
@@ -508,7 +530,7 @@ class HaServerHealthCard extends HTMLElement {
 	}
 
 	_normalizeSectionOrder(value) {
-		const defaults = ["home-assistant", "system", "network", "storage", "database", "updates", "backups"];
+		const defaults = ["home-assistant", "system", "network", "storage", "database", "containers-apps", "updates", "backups"];
 		const source = Array.isArray(value) ? value.filter((id) => defaults.includes(id)) : [];
 		return [...new Set([...source, ...defaults])];
 	}
@@ -516,7 +538,7 @@ class HaServerHealthCard extends HTMLElement {
 	_sectionVisible(id) {
 		const keys = {
 			"home-assistant": "show_home_assistant", system: "show_system", network: "show_network",
-			storage: "show_storage", database: "show_database", updates: "show_updates", backups: "show_backups",
+			storage: "show_storage", database: "show_database", "containers-apps": "show_containers_apps", updates: "show_updates", backups: "show_backups",
 		};
 		return this._config?.[keys[id]] !== false;
 	}
@@ -528,6 +550,7 @@ class HaServerHealthCard extends HTMLElement {
 			if (id === "network") return this._renderNetwork();
 			if (id === "storage") return this._renderStorage();
 			if (id === "database") return this._renderDatabase();
+			if (id === "containers-apps") return this._renderContainersApps();
 			if (id === "updates") return this._renderUpdates(updates);
 			if (id === "backups") return this._renderBackups();
 			return "";
@@ -892,6 +915,111 @@ class HaServerHealthCard extends HTMLElement {
 		this._refreshDynamicContent(["home-assistant", "storage", "updates"]);
 	}
 
+	_systemContainerDefinitions() {
+		return [["core","Home Assistant Core","mdi:home-assistant"],["supervisor","Supervisor","mdi:shield-home"],["audio","Audio","mdi:volume-high"],["cli","CLI","mdi:console"],["dns","DNS","mdi:dns"],["multicast","Multicast","mdi:access-point-network"],["observer","Observer","mdi:eye-outline"]];
+	}
+	async _supervisorGet(endpoint) { return this._hass.callWS({ type:"supervisor/api", endpoint, method:"get" }); }
+
+	_startContainersAppsRefresh() {
+		if (!this.isConnected || !this._hass || !this._config) return;
+		if (this._containersAppsRefreshTimer) clearInterval(this._containersAppsRefreshTimer);
+		this._loadContainersApps();
+		this._containersAppsRefreshTimer = setInterval(() => this._loadContainersApps(), 60000);
+	}
+
+	async _loadContainersApps() {
+		if (this._containersAppsLoadPromise) return this._containersAppsLoadPromise;
+		this._containersAppsLoadPromise = (async () => {
+			if (!this._hass?.callWS || this._hass?.user?.is_admin !== true || this._config?.show_containers_apps === false) {
+				const hadData = this._containersApps.systems.length || this._containersApps.apps.length;
+				this._containersApps = { infoLoading:false, statsLoading:false, infoLoadedAt:0, statsLoadedAt:0, systems:[], apps:[] };
+				if (hadData) this._refreshDynamicContent(["containers-apps"]);
+				return;
+			}
+			const startedAt = Date.now();
+			const loadInfo = startedAt - this._containersApps.infoLoadedAt >= 300000;
+			const loadStats = startedAt - this._containersApps.statsLoadedAt >= 60000;
+			if (!loadInfo && !loadStats) return;
+			const previousData = JSON.stringify([this._containersApps.systems, this._containersApps.apps]);
+			let systems = this._containersApps.systems;
+			let apps = this._containersApps.apps;
+			this._containersApps = { ...this._containersApps, infoLoading:loadInfo, statsLoading:loadStats };
+			const defs = this._systemContainerDefinitions();
+			const systemStatsPromise = loadStats
+				? Promise.allSettled(defs.map(([id]) => this._supervisorGet(`/${id}/stats`)))
+				: Promise.resolve([]);
+			const infoPromise = loadInfo
+				? Promise.all([
+					Promise.allSettled(defs.map(async ([id,name,icon]) => ({ id, name, icon, info:await this._supervisorGet(`/${id}/info`) }))),
+					this._supervisorGet("/addons").catch(() => null),
+				])
+				: Promise.resolve([null, null]);
+			const [systemStats, [systemInfo, addons]] = await Promise.all([systemStatsPromise, infoPromise]);
+			if (loadInfo) {
+				const previousSystems = new Map(systems.map(item => [item.id, item]));
+				systems = systemInfo.filter(result => result.status === "fulfilled").map(result => ({ ...result.value, stats:previousSystems.get(result.value.id)?.stats || null }));
+				const raw = addons?.data?.addons ?? addons?.addons ?? [];
+				const previousApps = new Map(apps.map(item => [item.slug, item]));
+				apps = Array.isArray(raw) ? raw.map(app => ({ ...app, stats:previousApps.get(app.slug)?.stats || null })) : [];
+			}
+			if (loadStats) {
+				const statsById = new Map(defs.map(([id], index) => [id, systemStats[index]]));
+				systems = systems.map(item => {
+					const result = statsById.get(item.id);
+					return { ...item, stats:result?.status === "fulfilled" ? result.value : item.stats };
+				});
+				const appStats = await Promise.allSettled(apps.map(item => item.state === "started" ? this._supervisorGet(`/addons/${item.slug}/stats`) : Promise.resolve(null)));
+				apps = apps.map((item, index) => ({ ...item, stats:item.state === "started" && appStats[index]?.status === "fulfilled" ? appStats[index].value : null }));
+			}
+			const completedAt = Date.now();
+			this._containersApps = {
+				infoLoading:false,
+				statsLoading:false,
+				infoLoadedAt:loadInfo && (systems.length || apps.length) ? completedAt : this._containersApps.infoLoadedAt,
+				statsLoadedAt:loadStats && (systems.length || apps.length) ? completedAt : this._containersApps.statsLoadedAt,
+				systems,
+				apps,
+			};
+			if (previousData !== JSON.stringify([systems, apps])) this._refreshDynamicContent(["containers-apps"]);
+		})().catch(error => {
+			console.debug("[ha-server-health-card][containers-apps] Unable to load containers and Apps", error);
+			this._containersApps = { ...this._containersApps, infoLoading:false, statsLoading:false };
+		}).finally(() => {
+			this._containersAppsLoadPromise = null;
+		});
+		return this._containersAppsLoadPromise;
+	}
+
+	_containerStatsText(stats) { if(!stats)return this._t("common.notAvailable"); const cpu=Number.isFinite(Number(stats.cpu_percent))?`${new Intl.NumberFormat(this._language(),{maximumFractionDigits:2}).format(Number(stats.cpu_percent))}%`:"--"; const ram=Number.isFinite(Number(stats.memory_percent))?`${new Intl.NumberFormat(this._language(),{maximumFractionDigits:1}).format(Number(stats.memory_percent))}%`:"--"; const mem=Number.isFinite(Number(stats.memory_usage))?this._formatBytes(Number(stats.memory_usage)):"--"; return `${this._t("labels.cpuShort")} ${cpu} · ${this._t("labels.ramShort")} ${ram} · ${mem}`; }
+
+	_renderContainerRow(item, app=false) {
+		const info = app ? item : item.info || {};
+		const running = app ? item.state === "started" : Boolean(item.stats);
+		const status = running ? this._t("labels.running") : app ? this._t("labels.stopped") : this._t("common.notAvailable");
+		const statusIcon = running ? "mdi:play" : "mdi:stop";
+		const version = info.version || "--";
+		const subtitle = app ? `${item.slug} · ${version}` : `hassio_${item.id} · ${version}`;
+		return `<div class="container-row ${running ? "running" : "stopped"}"><div class="container-icon"><ha-icon icon="${app ? "mdi:docker" : item.icon}"></ha-icon></div><div class="container-main"><strong>${this._escape(item.name)}</strong><small>${this._escape(subtitle)}</small></div><small class="container-status"><ha-icon icon="${statusIcon}"></ha-icon>${this._escape(status)}</small><div class="container-stats"><strong>${this._escape(this._containerStatsText(item.stats))}</strong></div></div>`;
+	}
+
+	_renderContainersApps() {
+		if (this._hass?.user?.is_admin !== true) return "";
+		const systems = this._containersApps.systems || [];
+		const apps = this._containersApps.apps || [];
+		const runningSystems = systems.filter((item) => item.stats).length;
+		const runningApps = apps.filter((item) => item.state === "started").length;
+		const total = systems.length + apps.length;
+		const running = runningSystems + runningApps;
+		const count = this._t("labels.runningCount").replace("{running}", running).replace("{total}", total);
+		const group = (key, title, rows, active) => {
+			const collapsed = this._containerGroupsCollapsed.has(key);
+			return `<div class="containers-group ${collapsed ? "collapsed" : ""}" data-container-group="${key}"><button type="button" class="containers-group-head" data-toggle-container-group="${key}" aria-expanded="${String(!collapsed)}"><strong>${this._escape(title)}</strong><span>${active}/${rows.length}</span><ha-icon icon="mdi:chevron-${collapsed ? "down" : "up"}"></ha-icon></button><div class="container-list">${rows.map((row) => row.html).join("")}</div></div>`;
+		};
+		const systemRows = systems.map((item) => ({ html: this._renderContainerRow(item, false) }));
+		const appRows = apps.map((item) => ({ html: this._renderContainerRow(item, true) }));
+		return this._renderSection("containers-apps", "mdi:docker", this._t("sections.containersApps"), `<div class="containers-apps">${group("systems", this._t("labels.containers"), systemRows, runningSystems)}${group("apps", this._t("labels.containerApps"), appRows, runningApps)}</div>`, `<span class="containers-summary">${this._escape(count)}</span>`);
+	}
+
 	async _loadRecorderInfo() {
 		if (!this._hass?.callWS || this._recorderInfo.loading) return;
 		if (this._recorderInfo.loadedAt && Date.now() - this._recorderInfo.loadedAt < 300000) return;
@@ -1241,6 +1369,7 @@ class HaServerHealthCard extends HTMLElement {
 			this._metricHistory.loadedAt,
 		]);
 		if (id === "database") return JSON.stringify([this._stateSignature(e.database), this._databaseHistory7d.loadedAt, this._recorderInfo.loadedAt]);
+		if (id === "containers-apps") return JSON.stringify([this._containersApps.infoLoadedAt, this._containersApps.statsLoadedAt]);
 		if (id === "storage") return JSON.stringify(Object.values(this._hass?.states || {}).filter((state) => /disk|swap/.test(state.entity_id)).map((state) => [state.entity_id, state.state, state.last_updated]));
 		if (id === "updates") return JSON.stringify(this._availableUpdates().map((state) => this._stateSignature(state.entity_id)));
 		if (id === "backups") return JSON.stringify([this._stateSignature(e.backupStatus), this._stateSignature(e.lastBackupSize), this._stateSignature(e.lastBackup), this._stateSignature(e.nextBackup), this._localePreferencesSignature(), this._backupManager.loadedAt]);
@@ -1248,7 +1377,7 @@ class HaServerHealthCard extends HTMLElement {
 	}
 
 	_captureSectionSignatures() {
-		["home-assistant", "system", "network", "storage", "database", "updates", "backups"].forEach((id) => this._sectionSignatures.set(id, this._sectionSignature(id)));
+		["home-assistant", "system", "network", "storage", "database", "containers-apps", "updates", "backups"].forEach((id) => this._sectionSignatures.set(id, this._sectionSignature(id)));
 	}
 
 	_sectionMarkup(id) {
@@ -1258,6 +1387,7 @@ class HaServerHealthCard extends HTMLElement {
 		if (id === "network") return this._renderNetwork();
 		if (id === "storage") return this._renderStorage();
 		if (id === "database") return this._renderDatabase();
+		if (id === "containers-apps") return this._renderContainersApps();
 		if (id === "updates") return this._renderUpdates(this._availableUpdates());
 		if (id === "backups") return this._renderBackups();
 		return "";
@@ -1279,6 +1409,7 @@ class HaServerHealthCard extends HTMLElement {
 		this._bindMoreInfo(section);
 		this._bindNavigation(section);
 		this._bindBackupDetails(section);
+		this._bindContainerGroups(section);
 	}
 
 	_refreshHero() {
@@ -2126,6 +2257,21 @@ class HaServerHealthCard extends HTMLElement {
 		});
 	}
 
+	_bindContainerGroups(root = this.shadowRoot) {
+		root.querySelectorAll("[data-toggle-container-group]").forEach((button) => {
+			button.addEventListener("click", () => {
+				const key = button.dataset.toggleContainerGroup;
+				if (this._containerGroupsCollapsed.has(key)) this._containerGroupsCollapsed.delete(key);
+				else this._containerGroupsCollapsed.add(key);
+				const collapsed = this._containerGroupsCollapsed.has(key);
+				button.closest("[data-container-group]")?.classList.toggle("collapsed", collapsed);
+				button.setAttribute("aria-expanded", String(!collapsed));
+				button.querySelector("ha-icon")?.setAttribute("icon", `mdi:chevron-${collapsed ? "down" : "up"}`);
+				this._saveCollapsedSections();
+			});
+		});
+	}
+
 	_bindEvents() {
 		this.shadowRoot.querySelectorAll("[data-toggle-section]").forEach((button) => {
 			button.addEventListener("click", () => this._toggleSection(button.dataset.toggleSection));
@@ -2134,6 +2280,7 @@ class HaServerHealthCard extends HTMLElement {
 		this._bindNavigation();
 		this._bindHealthDetails();
 		this._bindBackupDetails();
+		this._bindContainerGroups();
 	}
 
 	_applyCollapsedState() {
@@ -2145,6 +2292,18 @@ class HaServerHealthCard extends HTMLElement {
 			if (button) button.setAttribute("aria-expanded", String(!collapsed));
 			const icon = section.querySelector(".section-side ha-icon");
 			if (icon) icon.setAttribute("icon", `mdi:chevron-${collapsed ? "down" : "up"}`);
+		});
+	}
+
+	_applyContainerGroupsState() {
+		this.shadowRoot.querySelectorAll("[data-container-group]").forEach((group) => {
+			const key = group.dataset.containerGroup;
+			const collapsed = this._containerGroupsCollapsed.has(key);
+			group.classList.toggle("collapsed", collapsed);
+			const button = group.querySelector("[data-toggle-container-group]");
+			if (!button) return;
+			button.setAttribute("aria-expanded", String(!collapsed));
+			button.querySelector("ha-icon")?.setAttribute("icon", `mdi:chevron-${collapsed ? "down" : "up"}`);
 		});
 	}
 
@@ -2171,18 +2330,18 @@ class HaServerHealthCard extends HTMLElement {
 	}
 
 	_defaultCollapsedSections() {
-		return new Set(["home-assistant", "system", "network", "storage", "database", "updates", "backups"]);
+		return new Set(["home-assistant", "system", "network", "storage", "database", "containers-apps", "updates", "backups"]);
 	}
 
 	_normalizeCollapsedSections(value) {
-		const allowed = new Set(["home-assistant", "system", "storage", "network", "database", "updates", "backups"]);
+		const allowed = new Set(["home-assistant", "system", "storage", "network", "database", "containers-apps", "updates", "backups"]);
 		const source = Array.isArray(value) ? value : [];
 		return new Set(source.filter((sectionId) => allowed.has(sectionId)));
 	}
 
 	_normalizeUserPreferences(value) {
 		// Backward compatible with the previous array-only user_data format and health_details_open key.
-		if (Array.isArray(value)) return { collapsedSections: this._normalizeCollapsedSections(value), globalHealthOpen: false };
+		if (Array.isArray(value)) return { collapsedSections: this._normalizeCollapsedSections(value), globalHealthOpen: false, containerGroupsCollapsed: new Set(["systems", "apps"]) };
 		const source = value && typeof value === "object" ? value : {};
 		const hasStoredSections = Array.isArray(source.collapsed_sections);
 		return {
@@ -2190,6 +2349,7 @@ class HaServerHealthCard extends HTMLElement {
 				? this._normalizeCollapsedSections(source.collapsed_sections)
 				: this._defaultCollapsedSections(),
 			globalHealthOpen: source.global_health_open === true || source.health_details_open === true,
+			containerGroupsCollapsed: new Set(Array.isArray(source.container_groups_collapsed) ? source.container_groups_collapsed.filter((key) => ["systems", "apps"].includes(key)) : ["systems", "apps"]),
 		};
 	}
 
@@ -2213,18 +2373,22 @@ class HaServerHealthCard extends HTMLElement {
 			const preferences = this._normalizeUserPreferences(response?.value ?? response);
 			this._collapsed = preferences.collapsedSections;
 			this._healthDetailsOpen = preferences.globalHealthOpen;
+			this._containerGroupsCollapsed = preferences.containerGroupsCollapsed;
 			this._collapsedLoaded = true;
 			this._applyCollapsedState();
 			this._applyHealthDetailsState();
+			this._applyContainerGroupsState();
 			this._unsubscribeCollapsed = await this._hass.connection.subscribeMessage((message) => {
 				const next = this._normalizeUserPreferences(message?.value ?? message);
-				const current = JSON.stringify({ collapsed: [...this._collapsed].sort(), health: this._healthDetailsOpen });
-				const incoming = JSON.stringify({ collapsed: [...next.collapsedSections].sort(), health: next.globalHealthOpen });
+				const current = JSON.stringify({ collapsed: [...this._collapsed].sort(), health: this._healthDetailsOpen, containerGroups: [...this._containerGroupsCollapsed].sort() });
+				const incoming = JSON.stringify({ collapsed: [...next.collapsedSections].sort(), health: next.globalHealthOpen, containerGroups: [...next.containerGroupsCollapsed].sort() });
 				if (current === incoming) return;
 				this._collapsed = next.collapsedSections;
 				this._healthDetailsOpen = next.globalHealthOpen;
+				this._containerGroupsCollapsed = next.containerGroupsCollapsed;
 				this._applyCollapsedState();
 				this._applyHealthDetailsState();
+				this._applyContainerGroupsState();
 			}, { type: "frontend/subscribe_user_data", key });
 		} catch (error) {
 			console.warn("[ha-server-health-card] Unable to load collapsible section preferences", error);
@@ -2246,6 +2410,7 @@ class HaServerHealthCard extends HTMLElement {
 					collapsed_sections: [...this._collapsed],
 					global_health_open: this._healthDetailsOpen,
 					health_details_open: this._healthDetailsOpen,
+					container_groups_collapsed: [...this._containerGroupsCollapsed],
 				},
 			});
 		} catch (error) {
@@ -2253,9 +2418,15 @@ class HaServerHealthCard extends HTMLElement {
 		}
 	}
 
+	connectedCallback() {
+		this._startContainersAppsRefresh();
+	}
+
 	disconnectedCallback() {
 		if (typeof this._unsubscribeCollapsed === "function") this._unsubscribeCollapsed();
 		this._unsubscribeCollapsed = null;
+		if (this._containersAppsRefreshTimer) clearInterval(this._containersAppsRefreshTimer);
+		this._containersAppsRefreshTimer = null;
 	}
 
 	_escape(value) {
@@ -2335,6 +2506,7 @@ class HaServerHealthCard extends HTMLElement {
 			.storage-volume.warning .storage-meter i { background:var(--orange); } .storage-volume.warning .storage-percent { color:var(--orange); }
 			.storage-volume.critical .storage-meter i { background:var(--red); } .storage-volume.critical .storage-percent { color:var(--red); }
 			.empty { display:flex; justify-content:center; align-items:center; gap:6px; padding:12px; color:var(--green); font-size:11px; }
+			.containers-apps { display:grid; gap:9px; } .containers-group { overflow:hidden; border:1px solid var(--divider-color); border-radius:10px; background:var(--ha-server-tile-background); } .containers-group-head { display:grid; grid-template-columns:minmax(0,1fr) auto 18px; align-items:center; gap:7px; width:100%; padding:8px 10px; border:0; border-bottom:1px solid var(--divider-color); color:var(--primary-text-color); background:transparent; font:inherit; text-align:left; cursor:pointer; } .containers-group.collapsed .containers-group-head { border-bottom:0; } .containers-group-head strong { color:var(--secondary-text-color); font-size:var(--sh-font-small); font-weight:var(--sh-weight-medium); text-transform:uppercase; letter-spacing:.04em; } .containers-group-head span,.containers-summary { color:var(--primary-text-color); font-size:10px; font-weight:600; white-space:nowrap; } .containers-group-head ha-icon { color:var(--secondary-text-color); --mdc-icon-size:17px; } .container-list { display:grid; } .containers-group.collapsed .container-list { display:none; } .container-row { display:grid; grid-template-columns:34px minmax(0,1fr) auto; grid-template-areas:"icon main status" "icon stats stats"; align-items:center; gap:4px 9px; min-width:0; padding:8px 10px; border-bottom:1px solid var(--divider-color); } .container-row:last-child { border-bottom:0; } .container-icon { grid-area:icon; display:grid; place-items:center; width:30px; height:30px; border-radius:50%; color:var(--secondary-text-color); background:color-mix(in srgb,var(--secondary-text-color) 12%,transparent); } .container-icon ha-icon { --mdc-icon-size:17px; } .container-main { grid-area:main; min-width:0; } .container-main strong,.container-main small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .container-main strong { color:var(--primary-text-color); font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); } .container-main small { margin-top:2px; color:var(--secondary-text-color); font-size:10px; } .container-status { grid-area:status; display:inline-flex; align-items:center; gap:4px; justify-self:end; margin:0; padding:2px 6px; border-radius:999px; color:var(--green); background:color-mix(in srgb,var(--green) 13%,transparent); font-size:10px; font-weight:500; white-space:nowrap; } .container-status ha-icon { flex:0 0 auto; --mdc-icon-size:12px; } .container-row.stopped .container-status { color:var(--secondary-text-color); background:color-mix(in srgb,var(--secondary-text-color) 10%,transparent); } .container-stats { grid-area:stats; min-width:0; } .container-stats strong { display:block; overflow:hidden; color:var(--primary-text-color); font-size:10px; font-weight:600; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
 			.backup-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
 			.backup-locations { margin-top:9px; padding:9px 10px 4px; border:1px solid var(--divider-color); border-radius:10px; background:var(--ha-server-tile-background); }
 			.backup-agent-list { display:grid; }
@@ -2354,6 +2526,7 @@ class HaServerHealthCard extends HTMLElement {
 			.backup-details-list { display:grid; border-top:1px solid var(--divider-color); } .backup-details-list[hidden] { display:none; }
 			.backup-detail-row { display:grid; grid-template-columns:34px minmax(0,1fr) auto; align-items:center; gap:9px; min-width:0; padding:8px 10px; border-bottom:1px solid var(--divider-color); } .backup-detail-row:last-child { border-bottom:0; } .backup-detail-row > ha-icon { display:grid; place-items:center; width:30px; height:30px; border-radius:50%; color:var(--secondary-text-color); background:color-mix(in srgb,var(--secondary-text-color) 12%,transparent); --mdc-icon-size:17px; } .backup-detail-row.failed > ha-icon { color:var(--red); }
 			.backup-detail-main { min-width:0; } .backup-detail-main strong,.backup-detail-main small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .backup-detail-main strong { color:var(--primary-text-color); font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); line-height:1.2; } .backup-detail-main small { margin-top:2px; color:var(--secondary-text-color); font-size:var(--sh-font-small); line-height:1.2; } .backup-detail-main .backup-detail-failure { color:var(--red); font-weight:var(--sh-weight-medium); white-space:normal; } .backup-detail-destination.failed { color:var(--red); } .backup-detail-size { padding:2px 6px; border-radius:999px; color:var(--primary-text-color); background:color-mix(in srgb,var(--secondary-text-color) 18%,transparent); font-size:10px; font-weight:600; white-space:nowrap; }
+			@media (max-width:600px) { .container-row { grid-template-columns:34px minmax(0,1fr) auto; grid-template-areas:"icon main status" "icon stats stats"; gap:4px 7px; } .container-status { align-self:start; margin-top:0; } .container-stats { margin-top:2px; text-align:left; } .container-stats strong { text-align:left; } }  
 			@media (max-width:420px) { .section-summary { max-width:48vw; } .update-meta { flex-wrap:wrap; gap:2px 8px; } .update-version { flex-basis:100%; } }
 			@media (max-width:350px) { .hero-row { grid-template-columns:38px minmax(0,1fr); } .resource-grid,.version-grid,.system-info-grid,.info-grid,.traffic-grid,.health-grid,.backup-grid,.database-grid { grid-template-columns:1fr; } }
 		`;
@@ -2437,6 +2610,7 @@ class HaServerHealthCardEditor extends HTMLElement {
 			{ key: "network", label: this._t("sections.network"), icon: "mdi:lan", visibility: "show_network" },
 			{ key: "storage", label: this._t("sections.storage"), icon: "mdi:harddisk", visibility: "show_storage" },
 			{ key: "database", label: this._t("sections.database"), icon: "mdi:database", visibility: "show_database" },
+			{ key: "containers-apps", label: this._t("sections.containersApps"), icon: "mdi:docker", visibility: "show_containers_apps" },
 			{ key: "updates", label: this._t("sections.updates"), icon: "mdi:package-up", visibility: "show_updates" },
 			{ key: "backups", label: this._t("sections.backups"), icon: "mdi:backup-restore", visibility: "show_backups" },
 		];
