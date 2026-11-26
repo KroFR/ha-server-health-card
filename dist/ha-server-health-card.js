@@ -40,6 +40,7 @@ const TRANSLATIONS = {
 		health: "Health",
 		updates: "Updates",
 		backups: "Backups",
+		database: "Database",
 	},
 	labels: {
 		cpu: "CPU",
@@ -107,6 +108,12 @@ const TRANSLATIONS = {
 		backupCount: "{count} backups",
 		backupLatest: "Latest: {date}",
 		backupProtected: "Encrypted",
+		databaseSize: "Database size",
+		databaseGrowth7d: "Growth · 7 days",
+		recorder: "Recorder",
+		backlog: "Backlog",
+		running: "Healthy",
+		notRunning: "Not running",
 	},
 	editor: {
 		title: "Card title",
@@ -120,6 +127,7 @@ const TRANSLATIONS = {
 		showHealth: "Show Health",
 		showUpdates: "Show Updates",
 		showBackups: "Show Backups",
+		showDatabase: "Show Database",
 		general: "General",
 		cardLayout: "Card layout",
 		healthAnalysis: "Health analysis",
@@ -191,6 +199,7 @@ const TRANSLATIONS = {
 		health: "Santé",
 		updates: "Mises à jour",
 		backups: "Sauvegardes",
+		database: "Base de données",
 	},
 	labels: {
 		cpu: "CPU",
@@ -258,6 +267,12 @@ const TRANSLATIONS = {
 		backupCount: "{count} sauvegardes",
 		backupLatest: "Dernière : {date}",
 		backupProtected: "Chiffrée",
+		databaseSize: "Taille de la base",
+		databaseGrowth7d: "Croissance · 7 jours",
+		recorder: "Recorder",
+		backlog: "File d’attente",
+		running: "Sain",
+		notRunning: "Arrêté",
 	},
 	editor: {
 		title: "Titre de la carte",
@@ -271,6 +286,7 @@ const TRANSLATIONS = {
 		showHealth: "Afficher Santé",
 		showUpdates: "Afficher Mises à jour",
 		showBackups: "Afficher Sauvegardes",
+		showDatabase: "Afficher Base de données",
 		general: "Général",
 		cardLayout: "Disposition de la carte",
 		healthAnalysis: "Analyse de santé",
@@ -339,11 +355,12 @@ const DEFAULT_CONFIG = {
 	language: "auto",
 	show_icon: true,
 	show_header: true,
-	section_order: ["home-assistant", "system", "network", "storage", "updates", "backups"],
+	section_order: ["home-assistant", "system", "network", "storage", "database", "updates", "backups"],
 	show_home_assistant: true,
 	show_system: true,
 	show_network: true,
 	show_storage: true,
+	show_database: true,
 	show_updates: true,
 	show_backups: true,
 	health_analysis_enabled: true,
@@ -407,6 +424,8 @@ class HaServerHealthCard extends HTMLElement {
 		this._translationLanguage = "";
 		this._backupSizeHistory = { key: "", loading: false, loadedAt: 0, previous: null, delta: null, percent: null };
 		this._backupManager = { loading: false, loadedAt: 0, backups: [], agents: [], error: null };
+		this._recorderInfo = { loading: false, loadedAt: 0, data: null };
+		this._databaseHistory7d = { key: "", loading: false, loadedAt: 0, points: [] };
 	}
 
 	static getConfigElement() {
@@ -450,6 +469,8 @@ class HaServerHealthCard extends HTMLElement {
 			this._loadMetricHistory();
 			this._loadFrontendCounts();
 			this._loadBackupManager();
+			this._loadRecorderInfo();
+			this._loadDatabaseHistory7d();
 		}, 0);
 		if (firstUpdate || translationLanguageChanged || !this._initialized || !this.shadowRoot.querySelector("ha-card")) {
 			this._initialized = true;
@@ -472,15 +493,15 @@ class HaServerHealthCard extends HTMLElement {
 	}
 
 	_normalizeSectionOrder(value) {
-		const defaults = ["home-assistant", "system", "network", "storage", "updates", "backups"];
-		const source = Array.isArray(value) ? value : [];
-		return [...new Set([...source.filter((id) => defaults.includes(id)), ...defaults])];
+		const defaults = ["home-assistant", "system", "network", "storage", "database", "updates", "backups"];
+		const source = Array.isArray(value) ? value.filter((id) => defaults.includes(id)) : [];
+		return [...new Set([...source, ...defaults])];
 	}
 
 	_sectionVisible(id) {
 		const keys = {
 			"home-assistant": "show_home_assistant", system: "show_system", network: "show_network",
-			storage: "show_storage", updates: "show_updates", backups: "show_backups",
+			storage: "show_storage", database: "show_database", updates: "show_updates", backups: "show_backups",
 		};
 		return this._config?.[keys[id]] !== false;
 	}
@@ -491,6 +512,7 @@ class HaServerHealthCard extends HTMLElement {
 			if (id === "system") return this._renderSystem();
 			if (id === "network") return this._renderNetwork();
 			if (id === "storage") return this._renderStorage();
+			if (id === "database") return this._renderDatabase();
 			if (id === "updates") return this._renderUpdates(updates);
 			if (id === "backups") return this._renderBackups();
 			return "";
@@ -855,6 +877,61 @@ class HaServerHealthCard extends HTMLElement {
 		this._refreshDynamicContent(["home-assistant", "storage", "updates"]);
 	}
 
+	async _loadRecorderInfo() {
+		if (!this._hass?.callWS || this._recorderInfo.loading) return;
+		if (this._recorderInfo.loadedAt && Date.now() - this._recorderInfo.loadedAt < 300000) return;
+		this._recorderInfo = { ...this._recorderInfo, loading: true };
+		try {
+			const data = await this._hass.callWS({ type: "recorder/info" });
+			this._recorderInfo = { loading: false, loadedAt: Date.now(), data };
+		} catch (error) {
+			console.debug("[ha-server-health-card][recorder] Unable to load Recorder information", error);
+			this._recorderInfo = { loading: false, loadedAt: Date.now(), data: null };
+		}
+		this._refreshDynamicContent(["database"]);
+		this._refreshHero();
+	}
+
+	async _loadDatabaseHistory7d() {
+		const entityId = this._entities.database;
+		if (!this._hass?.callApi || !this._isValidEntityId(entityId) || this._databaseHistory7d.loading) return;
+		const key = entityId;
+		if (this._databaseHistory7d.key === key && Date.now() - this._databaseHistory7d.loadedAt < 3600000) return;
+		this._databaseHistory7d = { key, loading: true, loadedAt: 0, points: [] };
+		try {
+			const end = new Date();
+			const start = new Date(end.getTime() - 7 * 24 * 3600000);
+			const query = new URLSearchParams({ filter_entity_id: entityId, end_time: end.toISOString(), significant_changes_only: "0" });
+			const history = await this._hass.callApi("GET", `history/period/${start.toISOString()}?${query.toString()}`);
+			const points = this._normalizeMetricHistory(history, entityId);
+			this._databaseHistory7d = { key, loading: false, loadedAt: Date.now(), points };
+		} catch (error) {
+			console.debug("[ha-server-health-card][database] Unable to load 7-day database history", error);
+			this._databaseHistory7d = { key, loading: false, loadedAt: Date.now(), points: [] };
+		}
+		this._refreshDynamicContent(["database"]);
+	}
+
+	_databaseGrowth7d() {
+		const state = this._state(this._entities.database);
+		const currentBytes = this._dataSizeToBytes(state);
+		const first = this._databaseHistory7d.points?.[0];
+		if (!state || !Number.isFinite(currentBytes) || !first) return null;
+		const firstBytes = this._dataSizeToBytes({ state: String(first.value), attributes: { unit_of_measurement: first.unit || state.attributes?.unit_of_measurement || "B" } });
+		if (!Number.isFinite(firstBytes)) return null;
+		const deltaBytes = currentBytes - firstBytes;
+		const percent = firstBytes !== 0 ? deltaBytes / firstBytes * 100 : null;
+		return { deltaBytes, percent };
+	}
+
+	_formatDatabaseGrowth7d() {
+		const growth = this._databaseGrowth7d();
+		if (!growth || !Number.isFinite(growth.deltaBytes)) return this._t("common.notAvailable");
+		const sign = growth.deltaBytes > 0 ? "+" : growth.deltaBytes < 0 ? "−" : "±";
+		const percent = Number.isFinite(growth.percent) ? `${sign}${new Intl.NumberFormat(this._language(), { maximumFractionDigits: 1 }).format(Math.abs(growth.percent))}%` : "";
+		return `${sign}${this._formatBytes(Math.abs(growth.deltaBytes))}${percent ? ` · ${percent}` : ""}`;
+	}
+
 	async _loadBackupManager() {
 		if (!this._hass?.callWS || this._backupManager.loading) return;
 		if (this._hass?.user?.is_admin !== true) {
@@ -886,6 +963,7 @@ class HaServerHealthCard extends HTMLElement {
 		this._refreshDynamicContent(["backups"]);
 		this._refreshHero();
 	}
+
 	_backupAgentStats() {
 		const backups = this._backupManager.backups || [];
 		const knownAgents = new Map((this._backupManager.agents || []).map((agent) => [agent.agent_id, agent.name || agent.agent_id]));
@@ -912,6 +990,7 @@ class HaServerHealthCard extends HTMLElement {
 		}
 		return [...stats.values()].sort((left, right) => left.name.localeCompare(right.name));
 	}
+
 	_latestFailedBackupAgents() {
 		const backups = [...(this._backupManager.backups || [])].sort((left, right) => Date.parse(right?.date || 0) - Date.parse(left?.date || 0));
 		const latest = backups[0];
@@ -919,6 +998,7 @@ class HaServerHealthCard extends HTMLElement {
 		const names = new Map((this._backupManager.agents || []).map((agent) => [agent.agent_id, agent.name || agent.agent_id]));
 		return (latest.failed_agent_ids || []).map((id) => names.get(id) || id);
 	}
+
 	_backupHealth() {
 		const raw = String(this._stateValue(this._entities.backupStatus, "") || "").trim().toLowerCase();
 		if (!raw) return { failed: false, known: false, label: this._t("common.notAvailable") };
@@ -1145,6 +1225,7 @@ class HaServerHealthCard extends HTMLElement {
 			...this._systemMonitorNetworks().flatMap(([, values]) => [this._stateSignature(values.networkIn), this._stateSignature(values.networkOut)]),
 			this._metricHistory.loadedAt,
 		]);
+		if (id === "database") return JSON.stringify([this._stateSignature(e.database), this._databaseHistory7d.loadedAt, this._recorderInfo.loadedAt]);
 		if (id === "storage") return JSON.stringify(Object.values(this._hass?.states || {}).filter((state) => /disk|swap/.test(state.entity_id)).map((state) => [state.entity_id, state.state, state.last_updated]));
 		if (id === "updates") return JSON.stringify(this._availableUpdates().map((state) => this._stateSignature(state.entity_id)));
 		if (id === "backups") return JSON.stringify([this._stateSignature(e.backupStatus), this._stateSignature(e.lastBackupSize), this._stateSignature(e.lastBackup), this._stateSignature(e.nextBackup), this._localePreferencesSignature(), this._backupManager.loadedAt]);
@@ -1152,7 +1233,7 @@ class HaServerHealthCard extends HTMLElement {
 	}
 
 	_captureSectionSignatures() {
-		["home-assistant", "system", "network", "storage", "updates", "backups"].forEach((id) => this._sectionSignatures.set(id, this._sectionSignature(id)));
+		["home-assistant", "system", "network", "storage", "database", "updates", "backups"].forEach((id) => this._sectionSignatures.set(id, this._sectionSignature(id)));
 	}
 
 	_sectionMarkup(id) {
@@ -1161,6 +1242,7 @@ class HaServerHealthCard extends HTMLElement {
 		if (id === "system") return this._renderSystem();
 		if (id === "network") return this._renderNetwork();
 		if (id === "storage") return this._renderStorage();
+		if (id === "database") return this._renderDatabase();
 		if (id === "updates") return this._renderUpdates(this._availableUpdates());
 		if (id === "backups") return this._renderBackups();
 		return "";
@@ -1260,6 +1342,16 @@ class HaServerHealthCard extends HTMLElement {
 			}).join("") : `${this._summaryItem("↓", this._formatNetworkRate(this._entities.networkIn))}${this._summaryItem("↑", this._formatNetworkRate(this._entities.networkOut))}`;
 			return `<span class="section-summary network-section-summary" data-section-summary="${id}">${items}</span>`;
 		}
+		if (id === "database") {
+			const bytes = this._dataSizeToBytes(this._state(this._entities.database));
+			const size = Number.isFinite(bytes) ? this._formatBytes(bytes) : this._t("common.notAvailable");
+			const growth = this._databaseGrowth7d();
+			const growthPercent = growth && Number.isFinite(growth.percent)
+				? `${growth.percent > 0 ? "+" : growth.percent < 0 ? "−" : "±"}${new Intl.NumberFormat(this._language(), { maximumFractionDigits: 1 }).format(Math.abs(growth.percent))}%`
+				: this._t("common.notAvailable");
+			const sizeLevel = this._metricHealthLevel("database");
+			return `<span class="section-summary database-section-summary" data-section-summary="${id}">${this._summaryItem("Size", size, sizeLevel)}${this._summaryItem("Growth", growthPercent)}</span>`;
+		}
 		if (id === "storage") {
 			return `<span class="section-summary" data-section-summary="${id}">${Object.entries(this._systemMonitorDisks()).slice(0, 3).map(([mount, disk]) => {
 				const percent = this._diskUsage(disk).percent;
@@ -1280,7 +1372,7 @@ class HaServerHealthCard extends HTMLElement {
 	}
 
 	_refreshSectionSummaries() {
-		for (const id of ["home-assistant", "system", "network", "storage", "backups"]) {
+		for (const id of ["home-assistant", "system", "network", "storage", "database", "backups"]) {
 			const current = this.shadowRoot.querySelector(`[data-section-summary="${id}"]`);
 			if (!current) continue;
 			const template = document.createElement("template"); template.innerHTML = this._sectionSummary(id);
@@ -1409,7 +1501,6 @@ class HaServerHealthCard extends HTMLElement {
 			<div class="resource-grid">${metrics.map(([key, icon, label, unit, tone]) => this._miniGraphTile(icon, label, this._entities[key], { unit, tone, decimals: 0, healthMetric: key })).join("")}</div>
 			<div class="system-info-grid">
 				${this._systemInfoTile("mdi:ip-network", `${this._t("labels.ipv4")}${this._networkInterface() ? ` (${this._escape(this._networkInterface())})` : ""}`, this._formatEntity(this._entities.ipv4, { raw: true }), this._entities.ipv4)}
-				${this._miniGraphTile("mdi:database", this._t("labels.database"), this._entities.database, { decimals: 1, tone: "green", healthMetric: "database", showVariation24h: true })}
 				${this._systemInfoTile("mdi:clock-outline", this._t("labels.uptime"), this._formatUptime(this._entities.uptime), this._entities.uptime)}
 			</div>
 		`, this._sectionSummary("system"));
@@ -1656,6 +1747,18 @@ class HaServerHealthCard extends HTMLElement {
 		return "--";
 	}
 
+	_renderDatabase() {
+		const state = this._state(this._entities.database);
+		const bytes = this._dataSizeToBytes(state);
+		const size = Number.isFinite(bytes) ? this._formatBytes(bytes) : this._t("common.notAvailable");
+		const recorder = this._recorderInfo.data;
+		const recorderHealthy = recorder?.recording === true && recorder?.thread_running === true;
+		const recorderValue = recorder ? this._t(recorderHealthy ? "labels.running" : "labels.notRunning") : this._t("common.notAvailable");
+		const backlog = Number.isFinite(Number(recorder?.backlog)) ? new Intl.NumberFormat(this._language()).format(Number(recorder.backlog)) : this._t("common.notAvailable");
+		const tile = (icon, label, value, tone = "") => `<div class="database-tile ${tone}"><ha-icon icon="${icon}"></ha-icon><div><span>${this._escape(label)}</span><strong>${this._escape(value)}</strong></div></div>`;
+		return this._renderSection("database", "mdi:database", this._t("sections.database"), `<div class="database-grid">${tile("mdi:database", this._t("labels.databaseSize"), size)}${tile("mdi:chart-line", this._t("labels.databaseGrowth7d"), this._formatDatabaseGrowth7d())}${tile("mdi:database-check", this._t("labels.recorder"), recorderValue)}${tile("mdi:format-list-numbered", this._t("labels.backlog"), backlog)}</div>`, this._sectionSummary("database"));
+	}
+
 	_renderStorage() {
 		const disks = this._systemMonitorDisks();
 		const rows = Object.entries(disks).map(([mount, disk]) => {
@@ -1667,7 +1770,7 @@ class HaServerHealthCard extends HTMLElement {
 			return `<button type="button" class="storage-volume ${tone}" data-more-info="${this._escape(entityId)}"><div class="storage-volume-head"><ha-icon icon="mdi:harddisk"></ha-icon><strong>${this._escape(mount)}</strong><span class="storage-detail">${this._escape(detail)}</span><span class="storage-percent">${Number.isFinite(usage.percent) ? `${Math.round(percent)}%` : this._t("common.notAvailable")}</span></div><div class="storage-meter"><i style="width:${percent}%"></i></div></button>`;
 		}).join("");
 		if (!rows) return "";
-		return this._renderSection("storage", "mdi:database", this._t("sections.storage"), `<div class="storage-list">${rows}</div>`, this._sectionSummary("storage"));
+		return this._renderSection("storage", "mdi:harddisk", this._t("sections.storage"), `<div class="storage-list">${rows}</div>`, this._sectionSummary("storage"));
 	}
 
 	_renderNetwork() {
@@ -1940,11 +2043,11 @@ class HaServerHealthCard extends HTMLElement {
 	}
 
 	_defaultCollapsedSections() {
-		return new Set(["home-assistant", "system", "network", "storage", "updates", "backups"]);
+		return new Set(["home-assistant", "system", "network", "storage", "database", "updates", "backups"]);
 	}
 
 	_normalizeCollapsedSections(value) {
-		const allowed = new Set(["home-assistant", "system", "storage", "network", "updates", "backups"]);
+		const allowed = new Set(["home-assistant", "system", "storage", "network", "database", "updates", "backups"]);
 		const source = Array.isArray(value) ? value : [];
 		return new Set(source.filter((sectionId) => allowed.has(sectionId)));
 	}
@@ -2076,7 +2179,7 @@ class HaServerHealthCard extends HTMLElement {
 			.mini-graph small { grid-column:2; grid-row:1; align-self:start; overflow:hidden; color:var(--secondary-text-color); font-size:var(--sh-font-small); line-height:1.1; text-overflow:ellipsis; white-space:nowrap; }
 			.mini-graph strong { grid-column:2; grid-row:2; align-self:start; margin-top:0; overflow:hidden; color:var(--primary-text-color); font-family:inherit; font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); line-height:1.2; text-overflow:ellipsis; white-space:nowrap; }
 			.metric-variation { position:relative; z-index:1; grid-column:2; display:block; margin-top:1px; overflow:hidden; color:var(--secondary-text-color); font-size:var(--sh-font-small); font-weight:400; line-height:1.1; text-overflow:ellipsis; white-space:nowrap; cursor:help; } .mini-graph:has(.metric-variation) { min-height:68px; grid-template-rows:11px 17px 11px; } .mini-graph:has(.metric-variation) .metric-variation { grid-row:3; } .version-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; }
-			.system-info-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; margin-top:7px; }
+			.system-info-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin-top:7px; }
 			.version-tile { display:grid; grid-template-columns:22px minmax(0,1fr); align-items:center; gap:7px; min-width:0; padding:9px; border:1px solid var(--divider-color); border-radius:10px; color:var(--primary-text-color); background:var(--ha-server-tile-background); font:inherit; text-align:left; cursor:pointer; }
 			.version-tile ha-icon { color:var(--primary-color); --mdc-icon-size:20px; } .version-tile span,.version-tile small,.version-tile strong,.version-tile em { display:block; min-width:0; }
 			.version-tile small { overflow:hidden; color:var(--secondary-text-color); font-size:var(--sh-font-small); line-height:1.1; text-overflow:ellipsis; white-space:nowrap; } .version-tile strong { margin-top:2px; overflow:hidden; font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); line-height:1.15; text-overflow:ellipsis; white-space:nowrap; } .version-tile em { margin-top:3px; overflow:hidden; color:var(--green); font-size:var(--sh-font-small); font-style:normal; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; }
@@ -2092,6 +2195,12 @@ class HaServerHealthCard extends HTMLElement {
 			.updates { display:grid; gap:12px; } .update-group { display:grid; gap:3px; } .update-group + .update-group { padding-top:10px; border-top:1px solid var(--divider-color); } .update-group-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:0 2px 3px; } .update-group-head strong { color:var(--secondary-text-color); font-size:9px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; } .update-group-head span { display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; min-width:18px; height:18px; padding:0 5px; border-radius:999px; color:var(--secondary-text-color); background:color-mix(in srgb,var(--secondary-text-color) 11%,transparent); font-size:9px; font-weight:600; } .update-group-list { display:grid; } .update-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; padding:7px 2px; border-bottom:1px solid var(--divider-color); } .update-row:last-child { border-bottom:0; } .update-info { display:grid; grid-template-columns:22px minmax(0,1fr); align-items:center; gap:8px; min-width:0; padding:0; border:0; color:var(--primary-text-color); background:transparent; font:inherit; text-align:left; cursor:pointer; } .update-info > ha-icon { color:var(--secondary-text-color); --mdc-icon-size:20px; } .update-picture { width:20px; height:20px; object-fit:contain; border-radius:4px; } .update-info strong,.update-info small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .update-info strong { font-size:11px; } .update-info small { margin-top:4px; color:var(--secondary-text-color); font-size:10px; line-height:1.4; } .update-meta { display:flex !important; align-items:center; gap:10px; min-width:0; } .update-type,.update-version { display:inline-flex; align-items:center; gap:5px; min-width:0; } .update-type { flex:0 0 auto; color:var(--secondary-text-color); font-size:10px; font-weight:500; } .update-type ha-icon { --mdc-icon-size:13px; } .update-version { overflow:hidden; color:var(--primary-text-color); font-size:11px; } .update-version b { font-weight:600; white-space:nowrap; } .update-version b:last-child { font-weight:700; } .update-version ha-icon { flex:0 0 auto; color:var(--secondary-text-color); --mdc-icon-size:16px; } .update-action { min-width:58px; padding:5px 9px; border:0; border-radius:10px; color:var(--primary-color); background:color-mix(in srgb,var(--primary-color) 14%,transparent); font:inherit; font-size:10px; font-weight:700; cursor:pointer; } .update-action:hover { background:color-mix(in srgb,var(--primary-color) 22%,transparent); }
 			.badge,.backup-result-pill { display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; min-width:18px; min-height:18px; padding:2px 5px; border-radius:999px; font-size:10px; font-weight:400; line-height:14px; text-align:center; white-space:nowrap; } .badge { color:var(--blue); background:color-mix(in srgb,var(--blue) 12%,transparent); }
 			.update-badge.healthy { color:var(--green); background:color-mix(in srgb,var(--green) 14%,transparent); } .update-badge.warning { color:var(--orange); background:color-mix(in srgb,var(--orange) 14%,transparent); } .update-badge.critical { color:var(--red); background:color-mix(in srgb,var(--red) 14%,transparent); }
+			.database-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
+			.database-tile { display:grid; grid-template-columns:22px minmax(0,1fr); align-items:center; gap:8px; min-width:0; padding:10px; border:1px solid var(--divider-color); border-radius:10px; background:var(--ha-server-tile-background); }
+			.database-tile > ha-icon { color:var(--primary-color); --mdc-icon-size:21px; }
+			.database-tile span,.database-tile strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+			.database-tile span { color:var(--secondary-text-color); font-size:var(--sh-font-small); }
+			.database-tile strong { margin-top:2px; color:var(--primary-text-color); font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); }
 			.storage-list { display:grid; gap:5px; }
 			.storage-volume { display:grid; gap:7px; width:100%; padding:8px 3px 9px; border:0; border-bottom:1px solid var(--divider-color); color:var(--primary-text-color); background:transparent; font:inherit; text-align:left; cursor:pointer; } .storage-volume:last-child { border-bottom:0; }
 			.storage-volume-head { display:grid; grid-template-columns:20px minmax(80px,1fr) auto auto; align-items:center; gap:8px; }
@@ -2117,7 +2226,7 @@ class HaServerHealthCard extends HTMLElement {
 			.backup-agent-side { display:flex; align-items:center; gap:8px; white-space:nowrap; }
 			.backup-agent-side > span { color:var(--primary-text-color); font-size:var(--sh-font-small); font-weight:var(--sh-weight-medium); } .backup-state { display:flex; align-items:center; gap:9px; padding:10px; border:1px solid var(--divider-color); border-radius:10px; color:var(--primary-text-color); background:var(--ha-server-tile-background); } .backup-state ha-icon { color:var(--primary-color); --mdc-icon-size:24px; } .backup-grid .info { align-items:flex-start; border:1px solid var(--divider-color); } .backup-grid .backup-size.warning { border-color:var(--orange); } .backup-grid .backup-size.critical { border-color:var(--red); } .backup-grid [data-more-info],.backup-state[role="button"] { cursor:pointer; } .backup-state span,.backup-state strong { display:block; } .backup-state span { color:var(--secondary-text-color); font-size:var(--sh-font-small); line-height:1.1; } .backup-state strong { margin-top:2px; color:var(--primary-text-color); font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); line-height:1.15; } .backup-grid .info > div { min-width:0; } .backup-grid .info span { color:var(--secondary-text-color); font-size:var(--sh-font-small); line-height:1.1; } .backup-grid .info strong { margin-top:2px; overflow:hidden; color:var(--primary-text-color); font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); line-height:1.15; text-overflow:ellipsis; white-space:nowrap; } .backup-date-tile small { display:block; margin-top:3px; overflow:hidden; color:var(--secondary-text-color); font-size:var(--sh-font-small); font-weight:400; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; } .backup-size-delta { display:block; margin-top:3px; overflow:hidden; color:var(--secondary-text-color); font-size:var(--sh-font-small); font-weight:400; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; cursor:help; }
 			@media (max-width:420px) { .section-summary { max-width:48vw; } .update-meta { flex-wrap:wrap; gap:2px 8px; } .update-version { flex-basis:100%; } }
-			@media (max-width:350px) { .hero-row { grid-template-columns:38px minmax(0,1fr); } .resource-grid,.version-grid,.system-info-grid,.info-grid,.traffic-grid,.health-grid,.backup-grid { grid-template-columns:1fr; } }
+			@media (max-width:350px) { .hero-row { grid-template-columns:38px minmax(0,1fr); } .resource-grid,.version-grid,.system-info-grid,.info-grid,.traffic-grid,.health-grid,.backup-grid,.database-grid { grid-template-columns:1fr; } }
 		`;
 	}
 
@@ -2197,7 +2306,8 @@ class HaServerHealthCardEditor extends HTMLElement {
 			{ key: "home-assistant", label: this._t("sections.systemVersions"), icon: "mdi:home-assistant", visibility: "show_home_assistant" },
 			{ key: "system", label: this._t("sections.system"), icon: "mdi:server", visibility: "show_system" },
 			{ key: "network", label: this._t("sections.network"), icon: "mdi:lan", visibility: "show_network" },
-			{ key: "storage", label: this._t("sections.storage"), icon: "mdi:database", visibility: "show_storage" },
+			{ key: "storage", label: this._t("sections.storage"), icon: "mdi:harddisk", visibility: "show_storage" },
+			{ key: "database", label: this._t("sections.database"), icon: "mdi:database", visibility: "show_database" },
 			{ key: "updates", label: this._t("sections.updates"), icon: "mdi:package-up", visibility: "show_updates" },
 			{ key: "backups", label: this._t("sections.backups"), icon: "mdi:backup-restore", visibility: "show_backups" },
 		];
