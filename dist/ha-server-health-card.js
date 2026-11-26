@@ -2549,7 +2549,6 @@ class HaServerHealthCardEditor extends HTMLElement {
 	constructor() {
 		super();
 		this._rendered = false;
-		this._draggedSectionKey = "";
 	}
 
 	setConfig(config) {
@@ -2622,19 +2621,18 @@ class HaServerHealthCardEditor extends HTMLElement {
 		const configured = Array.isArray(this._config?.section_order) ? this._config.section_order : [];
 		const order = [...new Set([...configured, ...definitions.map((section) => section.key)])]
 			.filter((key) => byKey.has(key));
-
-		return order.map((key) => {
+		return order.map((key, index) => {
 			const section = byKey.get(key);
 			return `
 				<div class="section-order-item" data-section-key="${key}">
 					<div class="section-order-row">
-						<span class="drag-handle" draggable="true" title="${this._t("editor.moveUp")}">
-							<ha-icon icon="mdi:drag"></ha-icon>
-						</span>
 						<ha-icon class="section-icon" icon="${section.icon}"></ha-icon>
 						<span class="section-label">${section.label}</span>
+						<div class="section-order-actions">
+							<button type="button" class="section-move" data-section-move="up" title="${this._t("editor.moveUp")}" aria-label="${this._t("editor.moveUp")}"${index === 0 ? " disabled" : ""}><ha-icon icon="mdi:chevron-up"></ha-icon></button>
+							<button type="button" class="section-move" data-section-move="down" title="${this._t("editor.moveDown")}" aria-label="${this._t("editor.moveDown")}"${index === order.length - 1 ? " disabled" : ""}><ha-icon icon="mdi:chevron-down"></ha-icon></button>
+						</div>
 						<ha-switch data-config="${section.visibility}"></ha-switch>
-						<span class="section-expand-spacer"></span>
 					</div>
 				</div>
 			`;
@@ -2644,7 +2642,7 @@ class HaServerHealthCardEditor extends HTMLElement {
 	_render() {
 		if (!this._config) return;
 		this.innerHTML=`<style>
-			.editor{display:grid;gap:12px;padding:8px 0}details.section{overflow:hidden;background:var(--ha-card-background,var(--card-background-color));border:1px solid var(--divider-color);border-radius:var(--ha-card-border-radius,12px)}summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;color:var(--primary-text-color);font-size:16px;font-weight:600;cursor:pointer;list-style:none;user-select:none}summary::-webkit-details-marker{display:none}summary::after{content:"";width:8px;height:8px;border-right:2px solid var(--secondary-text-color);border-bottom:2px solid var(--secondary-text-color);transform:rotate(45deg);transition:transform .2s ease}details[open] summary::after{transform:rotate(225deg)}details[open] summary{border-bottom:1px solid var(--divider-color)}.section-title{display:flex;align-items:center;gap:10px}.section-title ha-icon{--mdc-icon-size:20px;color:var(--secondary-text-color)}.section-content{display:grid;gap:14px;padding:16px}.field,label{display:grid;min-width:0;gap:6px;color:var(--secondary-text-color);font-size:12px}input{box-sizing:border-box;width:100%;min-height:42px;padding:8px 10px;color:var(--primary-text-color);background:var(--ha-card-background,var(--card-background-color));border:1px solid var(--divider-color);border-radius:8px;font:inherit}input::placeholder{color:var(--secondary-text-color);opacity:.65}ha-selector{display:block;width:100%}.layout-options{display:grid;gap:4px;padding-bottom:10px;border-bottom:1px solid var(--divider-color)}.health-analysis-content{display:grid;gap:14px}.health-analysis-separator{height:1px;background:var(--divider-color)}.health-fields{display:grid;gap:14px}.health-fields.disabled{opacity:.45;pointer-events:none}.health-thresholds{display:grid;gap:8px}.variation-thresholds{padding-top:12px;border-top:1px solid var(--divider-color)}.health-thresholds-title{color:var(--primary-text-color);font-size:13px;font-weight:600}.health-thresholds-grid{display:grid;grid-template-columns:minmax(120px,1.4fr) repeat(2,minmax(86px,1fr));gap:8px 10px;align-items:end}.health-thresholds-head{color:var(--secondary-text-color);font-size:11px;font-weight:600;text-align:center}.health-metric-label{align-self:center;color:var(--primary-text-color);font-size:13px}.number-field{gap:5px}.health-thresholds-grid .number-field>span:first-child{display:none}.number-input-wrap{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px}.number-input-wrap input{min-width:0}.number-field.invalid input{border-color:var(--error-color,var(--red,#e34d59))}.number-field.invalid .field-suffix{color:var(--error-color,var(--red,#e34d59))}.threshold-validation{display:none;grid-column:2/-1;margin-top:-2px;color:var(--error-color,var(--red,#e34d59));font-size:10px;line-height:1.25}.threshold-validation.visible{display:block}.field-suffix{width:20px;color:var(--secondary-text-color);font-size:12px;text-align:left}.field-suffix.empty{visibility:hidden}.health-checks{display:grid;gap:4px;padding-top:10px;border-top:1px solid var(--divider-color)}.health-checks-title{margin-bottom:2px;color:var(--primary-text-color);font-size:13px;font-weight:600}.switch-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:42px}.switch-label{color:var(--primary-text-color);font-size:14px}.section-order-list{display:grid;gap:8px}.section-order-item{display:grid;overflow:hidden;border:1px solid var(--divider-color);border-radius:10px;background:var(--ha-card-background,var(--card-background-color));transition:border-color .16s ease,opacity .16s ease,transform .16s ease}.section-order-item.dragging{opacity:.45}.section-order-item.drag-over{border-color:var(--primary-color);transform:translateY(1px)}.section-order-row{display:grid;grid-template-columns:28px 24px minmax(0,1fr) auto 32px;align-items:center;gap:8px;min-height:48px;padding:5px 8px}.drag-handle{display:flex;align-items:center;justify-content:center;width:28px;height:34px;color:var(--secondary-text-color);cursor:grab;touch-action:none}.drag-handle:active{cursor:grabbing}.drag-handle ha-icon,.section-icon{--mdc-icon-size:18px}.section-icon{color:var(--secondary-text-color)}.section-label{min-width:0;overflow:hidden;color:var(--primary-text-color);font-size:14px;text-overflow:ellipsis;white-space:nowrap}.section-expand-spacer{width:32px}ha-switch{flex-shrink:0}@media(max-width:480px){.health-thresholds-grid{grid-template-columns:minmax(100px,1.25fr) repeat(2,minmax(72px,1fr));gap:7px}.number-input-wrap{gap:4px}}</style>
+			.editor{display:grid;gap:12px;padding:8px 0}details.section{overflow:hidden;background:var(--ha-card-background,var(--card-background-color));border:1px solid var(--divider-color);border-radius:var(--ha-card-border-radius,12px)}summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;color:var(--primary-text-color);font-size:16px;font-weight:600;cursor:pointer;list-style:none;user-select:none}summary::-webkit-details-marker{display:none}summary::after{content:"";width:8px;height:8px;border-right:2px solid var(--secondary-text-color);border-bottom:2px solid var(--secondary-text-color);transform:rotate(45deg);transition:transform .2s ease}details[open] summary::after{transform:rotate(225deg)}details[open] summary{border-bottom:1px solid var(--divider-color)}.section-title{display:flex;align-items:center;gap:10px}.section-title ha-icon{--mdc-icon-size:20px;color:var(--secondary-text-color)}.section-content{display:grid;gap:14px;padding:16px}.field,label{display:grid;min-width:0;gap:6px;color:var(--secondary-text-color);font-size:12px}input{box-sizing:border-box;width:100%;min-height:42px;padding:8px 10px;color:var(--primary-text-color);background:var(--ha-card-background,var(--card-background-color));border:1px solid var(--divider-color);border-radius:8px;font:inherit}input::placeholder{color:var(--secondary-text-color);opacity:.65}ha-selector{display:block;width:100%}.layout-options{display:grid;gap:4px;padding-bottom:10px;border-bottom:1px solid var(--divider-color)}.health-analysis-content{display:grid;gap:14px}.health-analysis-separator{height:1px;background:var(--divider-color)}.health-fields{display:grid;gap:14px}.health-fields.disabled{opacity:.45;pointer-events:none}.health-thresholds{display:grid;gap:8px}.variation-thresholds{padding-top:12px;border-top:1px solid var(--divider-color)}.health-thresholds-title{color:var(--primary-text-color);font-size:13px;font-weight:600}.health-thresholds-grid{display:grid;grid-template-columns:minmax(120px,1.4fr) repeat(2,minmax(86px,1fr));gap:8px 10px;align-items:end}.health-thresholds-head{color:var(--secondary-text-color);font-size:11px;font-weight:600;text-align:center}.health-metric-label{align-self:center;color:var(--primary-text-color);font-size:13px}.number-field{gap:5px}.health-thresholds-grid .number-field>span:first-child{display:none}.number-input-wrap{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px}.number-input-wrap input{min-width:0}.number-field.invalid input{border-color:var(--error-color,var(--red,#e34d59))}.number-field.invalid .field-suffix{color:var(--error-color,var(--red,#e34d59))}.threshold-validation{display:none;grid-column:2/-1;margin-top:-2px;color:var(--error-color,var(--red,#e34d59));font-size:10px;line-height:1.25}.threshold-validation.visible{display:block}.field-suffix{width:20px;color:var(--secondary-text-color);font-size:12px;text-align:left}.field-suffix.empty{visibility:hidden}.health-checks{display:grid;gap:4px;padding-top:10px;border-top:1px solid var(--divider-color)}.health-checks-title{margin-bottom:2px;color:var(--primary-text-color);font-size:13px;font-weight:600}.switch-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:42px}.switch-label{color:var(--primary-text-color);font-size:14px}.section-order-list{display:grid;overflow:hidden;border:1px solid var(--divider-color);border-radius:10px}.section-order-item{display:grid;background:var(--ha-card-background,var(--card-background-color));border-bottom:1px solid var(--divider-color)}.section-order-item:last-child{border-bottom:0}.section-order-row{display:grid;grid-template-columns:22px minmax(0,1fr) auto auto;align-items:center;gap:8px;min-height:42px;padding:2px 8px}.section-icon{--mdc-icon-size:18px;color:var(--secondary-text-color)}.section-label{min-width:0;overflow:hidden;color:var(--primary-text-color);font-size:14px;text-overflow:ellipsis;white-space:nowrap}.section-order-actions{display:flex;align-items:center;gap:0}.section-move{display:grid;place-items:center;width:30px;height:32px;padding:0;border:0;border-radius:8px;color:var(--secondary-text-color);background:transparent;cursor:pointer}.section-move ha-icon{--mdc-icon-size:18px}.section-move:not(:disabled):hover,.section-move:not(:disabled):focus-visible{color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,transparent)}.section-move:focus-visible{outline:1px solid var(--primary-color);outline-offset:1px}.section-move:disabled{opacity:.25;cursor:default}ha-switch{flex-shrink:0}@media(max-width:480px){.health-thresholds-grid{grid-template-columns:minmax(100px,1.25fr) repeat(2,minmax(72px,1fr));gap:7px}.number-input-wrap{gap:4px}}</style>
 		<div class="editor"><details class="section">${this._sectionSummary(HaServerHealthCardEditor.SECTION_ICONS.general,this._t("editor.general"))}<div class="section-content">
 		<label>${this._t("editor.title")}<input data-config="title" type="text" placeholder="${this._escape(this._t("card.title"))}"></label>
 		<label>${this._t("editor.subtitle")}<input data-config="subtitle" type="text" placeholder="${this._escape(this._t("card.subtitle"))}"></label>
@@ -2727,44 +2725,19 @@ class HaServerHealthCardEditor extends HTMLElement {
 	_initializeSectionOrder() {
 		const list = this.querySelector(".section-order-list");
 		if (!list) return;
-
-		const items = [...list.querySelectorAll(".section-order-item")];
-		items.forEach((item) => {
-			const handle = item.querySelector(".drag-handle");
-			handle?.addEventListener("dragstart", (event) => {
-				this._draggedSectionKey = item.dataset.sectionKey;
-				item.classList.add("dragging");
-				event.dataTransfer.effectAllowed = "move";
-				event.dataTransfer.setData("text/plain", this._draggedSectionKey);
-			});
-			handle?.addEventListener("dragend", () => {
-				this._draggedSectionKey = "";
-				items.forEach((candidate) => candidate.classList.remove("dragging", "drag-over"));
-			});
-			item.addEventListener("dragover", (event) => {
-				if (!this._draggedSectionKey) return;
-				event.preventDefault();
-				if (item.dataset.sectionKey !== this._draggedSectionKey) item.classList.add("drag-over");
-			});
-			item.addEventListener("dragleave", () => item.classList.remove("drag-over"));
-			item.addEventListener("drop", (event) => {
-				if (!this._draggedSectionKey) return;
-				event.preventDefault();
-				const source = this._draggedSectionKey;
-				const target = item.dataset.sectionKey;
-				if (!source || source === target) return;
-
+		list.querySelectorAll("[data-section-move]").forEach((button) => {
+			button.addEventListener("click", () => {
+				const item = button.closest(".section-order-item");
+				const key = item?.dataset.sectionKey;
+				const direction = button.dataset.sectionMove;
+				if (!key || !["up", "down"].includes(direction)) return;
 				const defaults = this._getSectionDefinitions().map((section) => section.key);
 				const configured = Array.isArray(this._config?.section_order) ? this._config.section_order : [];
-				const order = [...new Set([...configured, ...defaults])].filter((key) => defaults.includes(key));
-				const sourceIndex = order.indexOf(source);
-				if (sourceIndex < 0 || !order.includes(target)) return;
-
-				order.splice(sourceIndex, 1);
-				const targetIndex = order.indexOf(target);
-				const rect = item.getBoundingClientRect();
-				const after = event.clientY > rect.top + rect.height / 2;
-				order.splice(targetIndex + (after ? 1 : 0), 0, source);
+				const order = [...new Set([...configured, ...defaults])].filter((sectionKey) => defaults.includes(sectionKey));
+				const index = order.indexOf(key);
+				const nextIndex = direction === "up" ? index - 1 : index + 1;
+				if (index < 0 || nextIndex < 0 || nextIndex >= order.length) return;
+				[order[index], order[nextIndex]] = [order[nextIndex], order[index]];
 				this._emitConfig({ ...this._config, section_order: order }, true);
 			});
 		});
