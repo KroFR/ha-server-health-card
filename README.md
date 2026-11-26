@@ -12,7 +12,7 @@ HA Server Health Card automatically discovers supported entities, displays 24-ho
 
 | Light Theme | Dark Theme |
 | ----------- | ---------- |
-| <img width="502" height="704" alt="image" src="https://github.com/user-attachments/assets/02c796b3-b1cf-46f2-a905-f3cf9a51a568" /> | <img width="505" height="707" alt="image" src="https://github.com/user-attachments/assets/26639317-bb0d-4087-82d2-6b4cdc881c25" /> |
+| <img width="502" height="790" alt="image" src="https://github.com/user-attachments/assets/add42086-abd0-4311-a0ef-7bd548b6563c" /> | <img width="504" height="791" alt="image" src="https://github.com/user-attachments/assets/fe0e56a5-6d31-48b5-9c02-b9cb24cd4108" /> |
 
 ## ✨ Features
 
@@ -228,7 +228,7 @@ The System section displays CPU, memory and disk usage, IPv4 address, Home Assis
 
 | Light Theme | Dark Theme |
 | ----------- | ---------- |
-| <img width="504" height="178" alt="image" src="https://github.com/user-attachments/assets/17d02233-0ff7-46a5-bd75-4da50e2a2ef7" /> | <img width="504" height="175" alt="image" src="https://github.com/user-attachments/assets/bffefc0f-0473-485d-aa4f-1b0ce875ef9e" /> |
+| <img width="503" height="156" alt="image" src="https://github.com/user-attachments/assets/3f2e0d03-1ad3-424a-83ae-ff72eebb4587" /> | <img width="506" height="158" alt="image" src="https://github.com/user-attachments/assets/b3b1a46f-688a-49f0-9911-0b57ae33cd71" /> |
 
 CPU, memory, disk, and database tiles use 24-hour history when available. The Database tile displays its size change over the last 24 hours, and the absolute percentage variation can trigger Health Warning or Critical alerts.
 
@@ -258,7 +258,7 @@ The Containers & Apps section monitors Home Assistant Supervisor system containe
 
 | Light Theme | Dark Theme |
 | ----------- | ---------- |
-|  image  |  image  |
+|  <img width="505" height="279" alt="image" src="https://github.com/user-attachments/assets/f53f82b3-eaae-4f5d-bd2c-fd03a4d96a41" />  |  <img width="505" height="280" alt="image" src="https://github.com/user-attachments/assets/f6573969-deb3-4028-98ed-ac2a7bfec2ab" />  |
 
 Each row displays the container or App name, version, runtime status, CPU usage, RAM usage, and container size.
 
@@ -268,7 +268,7 @@ The Updates section lists update entities that currently report an available upd
 
 | Light Theme | Dark Theme |
 | ----------- | ---------- |
-| <img width="503" height="476" alt="image" src="https://github.com/user-attachments/assets/0dced77e-e247-4a5b-ae76-42ef1cd112bf" /> | <img width="506" height="476" alt="image" src="https://github.com/user-attachments/assets/9a100de0-3957-4518-afc3-41e928d22897" /> |
+| <img width="503" height="417" alt="image" src="https://github.com/user-attachments/assets/6e666a42-ea09-4f5c-8ee0-c3832dce037b" /> | <img width="503" height="414" alt="image" src="https://github.com/user-attachments/assets/2a86bf77-2ccd-4908-a6f8-37fdac69ce1e" /> |
 
 Available updates are grouped into Home Assistant, Marketplace, Firmware, Apps, and Others. Empty groups are hidden, each visible group shows its item count, and a dedicated **All updates are installed** message is displayed when no updates remain. The total number of available updates can participate in global Health analysis.
 
@@ -278,7 +278,7 @@ The Backups section displays backup status, latest backup details, size variatio
 
 | Light Theme | Dark Theme |
 | ----------- | ---------- |
-| <img width="505" height="351" alt="image" src="https://github.com/user-attachments/assets/848644c3-11c9-404b-a157-7df0a632a4f9" /> | <img width="506" height="354" alt="image" src="https://github.com/user-attachments/assets/ac6279e6-feeb-4be2-af9a-accce4d8a567" /> |
+| <img width="502" height="434" alt="image" src="https://github.com/user-attachments/assets/fde7df05-16f3-499f-9c48-304365e19ab5" /> | <img width="506" height="427" alt="image" src="https://github.com/user-attachments/assets/20893087-ccc7-4208-a69b-515a03af9d8e" /> |
 
 For each detected destination, the card displays the Home Assistant-provided name, number of available backups, latest backup date, latest backup size, and current success or failure state. Destinations can include **Local**, network storage, cloud storage, and third-party backup agents such as **Google Drive**.
 
