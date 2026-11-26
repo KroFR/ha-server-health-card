@@ -18,6 +18,7 @@ HA Server Health Card automatically discovers supported entities, displays 24-ho
 
 - Global server health status with configurable visibility and Warning and Critical thresholds
 - Monitor Home Assistant, CPU, memory, disk, database, network, and storage
+- Monitor Supervisor system containers and Apps with runtime status, version, CPU, and memory usage
 - Track categorized updates, backup status, and backup destinations
 - 24-hour mini graphs with database and backup size variation alerts
 - Automatic discovery of supported Home Assistant entities
@@ -28,6 +29,7 @@ HA Server Health Card automatically discovers supported entities, displays 24-ho
 
 - Home Assistant 2025.1 or newer recommended
 - [System Monitor](https://www.home-assistant.io/integrations/systemmonitor/) is recommended for CPU, memory, disk, uptime, IP address, network, and storage metrics
+- The card works for both administrator and non-administrator users. The Containers & Apps section requires an administrator account because it relies on the Home Assistant Supervisor API.
 - Backup entities are required for backup summary tiles. Destination details use Home Assistant Backup Manager data when available
 - Update entities are required for update information
 
@@ -91,7 +93,7 @@ The visual editor covers the main settings. Every option below can also be confi
 | `language` | string | `auto` | Translation language: `auto`, `en`, or `fr`. `auto` follows the Home Assistant user preference. |
 | `show_icon` | boolean | `true` | Shows the Home Assistant icon in the card header. |
 | `show_header` | boolean | `true` | Shows the card title and subtitle. |
-| `section_order` | list | See below | Controls the order of the six card sections. Unknown or missing section IDs are normalized automatically. |
+| `section_order` | list | See below | Controls the order of the eight card sections. Unknown or missing section IDs are normalized automatically. |
 
 Default section order:
 
@@ -101,6 +103,8 @@ section_order:
   - system
   - network
   - storage
+  - database
+  - containers-apps
   - updates
   - backups
 ```
@@ -113,6 +117,8 @@ section_order:
 | `show_system` | boolean | `true` | Shows CPU, memory, disk, database, IPv4, and uptime. |
 | `show_network` | boolean | `true` | Shows detected network interfaces and throughput. |
 | `show_storage` | boolean | `true` | Shows detected storage volumes and usage. |
+| `show_database` | boolean | `true` | Shows Recorder status, backlog, database size, and seven-day growth. |
+| `show_containers_apps` | boolean | `true` | Shows Supervisor system containers and Apps for administrator u
 | `show_updates` | boolean | `true` | Shows available update entities. |
 | `show_backups` | boolean | `true` | Shows backup status, size, dates, schedule, and per-destination details. |
 
@@ -246,6 +252,16 @@ Storage volumes are automatically discovered from compatible disk sensors and di
 
 Disk Warning and Critical thresholds are applied to storage usage.
 
+## 🐳 Containers & Apps
+
+The Containers & Apps section monitors Home Assistant Supervisor system containers and installed Apps.
+
+| Light Theme | Dark Theme |
+| ----------- | ---------- |
+|  image  |  image  |
+
+Each row displays the container or App name, version, runtime status, CPU usage, RAM usage, and container size.
+
 ## 📥 Updates
 
 The Updates section lists update entities that currently report an available update.
@@ -285,6 +301,20 @@ For each detected destination, the card displays the Home Assistant-provided nam
 - Verify that System Monitor exposes incoming and outgoing throughput sensors for a physical interface
 - Check that the selected interface is active
 - Virtual and loopback interfaces are filtered intentionally
+
+### Containers & Apps is missing
+
+- Confirm that the current Home Assistant user is an administrator
+- Confirm that the card runs on a Home Assistant installation with Supervisor access
+- Enable **Containers & Apps** in the visual editor or set `show_containers_apps: true`
+- Reload the dashboard after changing the card configuration
+
+### Container statistics display Not available
+
+- Wait for the initial Supervisor requests to complete
+- Confirm that the relevant system container or App is running
+- Check the browser console for `[ha-server-health-card][containers-apps]` messages
+- Verify that the current administrator account can open **Settings > System > Apps**
 
 ### Backup information is missing
 
