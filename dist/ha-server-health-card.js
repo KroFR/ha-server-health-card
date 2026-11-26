@@ -797,11 +797,12 @@ class HaServerHealthCard extends HTMLElement {
 		if (this._registryLoading || cacheValid) return;
 		this._registryLoading = true;
 		try {
+			const isAdmin = this._hass?.user?.is_admin === true;
 			const [configEntries, devices, entityRegistry, supervisor] = await Promise.all([
 				this._hass.callWS({ type: "config_entries/get" }),
 				this._hass.callWS({ type: "config/device_registry/list" }),
 				this._hass.callWS({ type: "config/entity_registry/list" }),
-				this._hass.callWS({ type: "supervisor/api", endpoint: "/addons", method: "get" }).catch(() => null),
+				isAdmin ? this._hass.callWS({ type: "supervisor/api", endpoint: "/addons", method: "get" }).catch(() => null) : Promise.resolve(null),
 			]);
 			const previousEntities = JSON.stringify(this._entities);
 			this._entityRegistry = Array.isArray(entityRegistry) ? entityRegistry : [];
@@ -856,6 +857,14 @@ class HaServerHealthCard extends HTMLElement {
 
 	async _loadBackupManager() {
 		if (!this._hass?.callWS || this._backupManager.loading) return;
+		if (this._hass?.user?.is_admin !== true) {
+			if (this._backupManager.backups.length || this._backupManager.agents.length || this._backupManager.error) {
+				this._backupManager = { loading: false, loadedAt: 0, backups: [], agents: [], error: null };
+				this._refreshDynamicContent(["backups"]);
+				this._refreshHero();
+			}
+			return;
+		}
 		if (this._backupManager.loadedAt && Date.now() - this._backupManager.loadedAt < 300000) return;
 		this._backupManager = { ...this._backupManager, loading: true };
 		try {
@@ -1365,7 +1374,7 @@ class HaServerHealthCard extends HTMLElement {
 			[counts.helpers, this._t("labels.helpers"), "", "/config/helpers"],
 			[counts.apps, this._t("labels.apps"), "", "/config/apps/installed"],
 			[counts.marketplace, this._t("labels.marketplace"), "", "/marketplace/browse?sort=type&group=status&status=installed"],
-		];
+		].filter(([value]) => value != null);
 		const entityStats = [
 			[counts.entities, this._t("labels.total"), "", "/config/entities"],
 			[counts.enabledEntities, this._t("labels.enabledEntities"), "", "/config/entities?status=enabled"],
@@ -1381,7 +1390,7 @@ class HaServerHealthCard extends HTMLElement {
 			</div>
 			<div class="instance-group">
 				<div class="instance-group-title">${this._t("labels.configuration")}</div>
-				<div class="instance-summary configuration-summary">${renderStats(configurationStats)}</div>
+				<div class="instance-summary configuration-summary" style="--configuration-columns:${Math.max(1, configurationStats.length)}">${renderStats(configurationStats)}</div>
 			</div>
 			<div class="instance-group">
 				<div class="instance-group-title">${this._t("labels.entities")}</div>
@@ -2072,7 +2081,7 @@ class HaServerHealthCard extends HTMLElement {
 			.version-tile ha-icon { color:var(--primary-color); --mdc-icon-size:20px; } .version-tile span,.version-tile small,.version-tile strong,.version-tile em { display:block; min-width:0; }
 			.version-tile small { overflow:hidden; color:var(--secondary-text-color); font-size:var(--sh-font-small); line-height:1.1; text-overflow:ellipsis; white-space:nowrap; } .version-tile strong { margin-top:2px; overflow:hidden; font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); line-height:1.15; text-overflow:ellipsis; white-space:nowrap; } .version-tile em { margin-top:3px; overflow:hidden; color:var(--green); font-size:var(--sh-font-small); font-style:normal; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; }
 			.version-tile.has-update { border-color:var(--orange); } .version-tile.has-update ha-icon,.version-tile.has-update em { color:var(--orange); }
-			.instance-group { margin-top:8px; padding:9px 10px 10px; border:1px solid var(--divider-color); border-radius:9px; background:var(--ha-server-tile-background); } .instance-group-title { margin:0 0 8px; color:var(--secondary-text-color); font-size:var(--sh-font-small); font-weight:var(--sh-weight-medium); line-height:1.2; text-transform:uppercase; letter-spacing:.04em; } .instance-summary { display:grid; gap:10px 14px; } .configuration-summary { grid-template-columns:repeat(5,minmax(0,1fr)); } .entities-summary { grid-template-columns:repeat(4,minmax(0,1fr)); }
+			.instance-group { margin-top:8px; padding:9px 10px 10px; border:1px solid var(--divider-color); border-radius:9px; background:var(--ha-server-tile-background); } .instance-group-title { margin:0 0 8px; color:var(--secondary-text-color); font-size:var(--sh-font-small); font-weight:var(--sh-weight-medium); line-height:1.2; text-transform:uppercase; letter-spacing:.04em; } .instance-summary { display:grid; gap:10px 14px; } .configuration-summary { grid-template-columns:repeat(var(--configuration-columns,5),minmax(0,1fr)); } .entities-summary { grid-template-columns:repeat(4,minmax(0,1fr)); }
 			.instance-stat { display:flex; flex-direction:column; min-width:0; padding:0; border:0; color:inherit; background:transparent; font:inherit; text-align:left; cursor:pointer; } .instance-stat:hover strong,.instance-stat:focus-visible strong { color:var(--primary-color); } .instance-stat:focus-visible { outline:1px solid var(--primary-color); outline-offset:3px; border-radius:4px; } .instance-stat strong { color:var(--primary-text-color); font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); line-height:1.2; } .instance-stat small { margin-top:2px; overflow:hidden; color:var(--secondary-text-color); font-size:var(--sh-font-small); line-height:1.2; text-overflow:ellipsis; white-space:nowrap; } .instance-stat.warning strong,.instance-stat.warning small { color:var(--orange); }
 			.system-info-tile strong { white-space:normal; overflow-wrap:anywhere; }
 			.network-interfaces { display:grid; gap:9px; } .network-interface + .network-interface { padding-top:9px; border-top:1px solid var(--divider-color); } .info-grid,.traffic-grid,.health-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; margin-top:7px; }
