@@ -2170,7 +2170,7 @@ class HaServerHealthCard extends HTMLElement {
 			const failedIds = new Set(backup?.failed_agent_ids || []);
 			const destinations = Object.keys(backup?.agents || {}).map((id) => `<span class="backup-detail-destination ${failedIds.has(id) ? "failed" : ""}">${this._escape(agentNames.get(id) || id)}</span>`).join(", ");
 			const type = this._backupTypeLabel(backup);
-			const metadata = [this._backupRelativeDate(backup?.date), type, destinations].filter(Boolean).join(" · ");
+			const metadata = [this._backupRelativeDate(backup?.date),  this._escape(type), destinations].filter(Boolean).join(" · ");
 			const failed = failedIds.size || (backup?.failed_addons || []).length || (backup?.failed_folders || []).length;
 			const failureReason = failed ? this._backupFailureReason(backup, agentNames) : "";
 			return `<div class="backup-detail-row ${failed ? "failed" : ""}"><ha-icon icon="mdi:archive-outline"></ha-icon><div class="backup-detail-main"><strong>${this._escape(backup?.name || backup?.backup_id || this._t("labels.backupDetails"))}</strong><small>${metadata}</small>${failureReason ? `<small class="backup-detail-failure">${this._escape(failureReason)}</small>` : ""}</div><span class="backup-detail-size">${this._escape(this._backupDisplaySize(backup))}</span></div>`;
