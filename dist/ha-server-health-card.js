@@ -116,6 +116,8 @@ const TRANSLATIONS = {
 		backupFailedDestination: "Destination: {name}",
 		backupFailedAddon: "App: {name}",
 		backupFailedFolder: "Folder: {name}",
+		systemMonitorUnavailable: "System Monitor integration is not available or the required entity is disabled. Click to open System Monitor.",
+		uptimeIntegrationUnavailable: "Home Assistant Uptime integration is not available or its entity is disabled. Click to open Uptime.",
 		databaseSize: "Database size",
 		databaseGrowth7d: "Growth · 7 days",
 		recorder: "Recorder",
@@ -292,6 +294,8 @@ const TRANSLATIONS = {
 		backupFailedDestination: "Destination : {name}",
 		backupFailedAddon: "App : {name}",
 		backupFailedFolder: "Dossier : {name}",
+		systemMonitorUnavailable: "L’intégration System Monitor n’est pas disponible ou l’entité requise est désactivée. Cliquez pour ouvrir System Monitor.",
+		uptimeIntegrationUnavailable: "L’intégration Uptime de Home Assistant n’est pas disponible ou son entité est désactivée. Cliquez pour ouvrir Uptime.",
 		databaseSize: "Taille de la base",
 		databaseGrowth7d: "Croissance · 7 jours",
 		recorder: "Recorder",
@@ -614,6 +618,10 @@ class HaServerHealthCard extends HTMLElement {
 			if (!entry?.entity_id || entry.hidden || entry.disabled_by != null || !states[entry.entity_id]) continue;
 			const state = states[entry.entity_id];
 			const key = entry.translation_key || "";
+			if (entry.platform === "uptime" && entry.entity_id.startsWith("sensor.")) {
+				const timestamp = Date.parse(state.state);
+				if (Number.isFinite(timestamp)) result.coreUptime ??= entry.entity_id;
+			}
 			if (entry.platform === "systemmonitor") {
 				const scalar = scalarKeys[key] || (!key && state.attributes?.device_class === "uptime" ? "uptime" : null);
 				if (scalar) result[scalar] ??= entry.entity_id;
@@ -1474,9 +1482,11 @@ class HaServerHealthCard extends HTMLElement {
 		}
 	}
 	_updateSystemInfoValues() {
+		const coreUptime = this._discoverEntitiesFromRegistry().coreUptime;
 		const values = new Map([
 			[this._entities.ipv4, this._formatEntity(this._entities.ipv4, { raw: true })],
 			[this._entities.uptime, this._formatUptime(this._entities.uptime)],
+			[coreUptime, this._formatUptime(coreUptime)],
 		]);
 		this.shadowRoot.querySelectorAll("[data-info-entity]").forEach((element) => {
 			const next = values.get(element.dataset.infoEntity);
@@ -1790,11 +1800,11 @@ class HaServerHealthCard extends HTMLElement {
 			<div class="system-metric-group">
 				<div class="instance-group-title">${this._escape(this._t("labels.host"))}</div>
 				<div class="resource-grid">${hostMetrics.map(([key, icon, label, tone]) => this._miniGraphTile(
-					icon, label, this._entities[key], { unit: "%", tone, decimals: 0, healthMetric: key },
+					icon, label, this._entities[key], { unit: "%", tone, decimals: 0, healthMetric: key, missingNavigate: "/config/integrations/integration/systemmonitor", missingTooltip: this._t("labels.systemMonitorUnavailable") },
 				)).join("")}</div>
 				<div class="system-info-grid">
-					${this._systemInfoTile("mdi:ip-network", `${this._t("labels.ipv4")}${this._networkInterface() ? ` (${this._escape(this._networkInterface())})` : ""}`, this._formatEntity(this._entities.ipv4, { raw: true }), this._entities.ipv4)}
-					${this._systemInfoTile("mdi:clock-outline", this._t("labels.uptime"), this._formatUptime(this._entities.uptime), this._entities.uptime)}
+					${this._optionalIntegrationTile("mdi:ip-network", `${this._t("labels.ipv4")}${this._networkInterface() ? ` (${this._escape(this._networkInterface())})` : ""}`, this._formatEntity(this._entities.ipv4, { raw: true }), this._entities.ipv4, "/config/integrations/integration/systemmonitor", this._t("labels.systemMonitorUnavailable"))}
+					${this._optionalIntegrationTile("mdi:clock-outline", this._t("labels.uptime"), this._formatUptime(this._entities.uptime), this._entities.uptime, "/config/integrations/integration/systemmonitor", this._t("labels.systemMonitorUnavailable"))}
 				</div>
 			</div>`;
 		const coreGroup = core ? `
@@ -1807,12 +1817,20 @@ class HaServerHealthCard extends HTMLElement {
 					].map(([entityId, icon, label, tone]) => this._miniGraphTile(
 						icon, label, entityId, { unit: "%", tone, decimals: 1, recorderMetric: true },
 					)).join("")}
+					${this._optionalIntegrationTile(
+						"mdi:clock-outline",
+						this._t("labels.uptime"),
+						this._formatUptime(this._discoverEntitiesFromRegistry().coreUptime),
+						this._discoverEntitiesFromRegistry().coreUptime,
+						"/config/integrations/integration/uptime",
+						this._t("labels.uptimeIntegrationUnavailable"),
+					)}
 				</div>
 			</div>` : "";
 		const supervisorGroup = supervisor ? `
 			<div class="system-metric-group">
 				<div class="instance-group-title">${this._escape(this._t("labels.supervisor"))}</div>
-				<div class="resource-grid core-resource-grid">
+				<div class="resource-grid core-resource-grid supervisor-resource-grid">
 					${[
 						[supervisor.cpuEntity, "mdi:cpu-64-bit", this._t("labels.cpu"), "blue"],
 						[supervisor.ramEntity, "mdi:memory", this._t("labels.memory"), "purple"],
@@ -1829,6 +1847,13 @@ class HaServerHealthCard extends HTMLElement {
 
 	_systemInfoTile(icon, label, value, entityId) {
 		return `<button type="button" class="version-tile system-info-tile" data-info-entity="${this._escape(entityId || "")}"${entityId ? ` data-more-info="${this._escape(entityId)}"` : ""}><ha-icon icon="${icon}"></ha-icon><span><small>${label}</small><strong data-role="info-value">${this._escape(String(value))}</strong></span></button>`;
+	}
+	_optionalIntegrationTile(icon, label, value, entityId, path, tooltip) {
+		const available = this._isValidEntityId(entityId) && this._state(entityId);
+		const interaction = available
+			? ` data-more-info="${this._escape(entityId)}"`
+			: ` data-navigate="${this._escape(path)}" title="${this._escape(tooltip)}" aria-label="${this._escape(`${label}: ${this._t("common.notAvailable")}. ${tooltip}`)}"`;
+		return `<button type="button" class="version-tile system-info-tile optional-integration-tile ${available ? "" : "is-missing"}" data-info-entity="${this._escape(entityId || "")}"${interaction}><ha-icon icon="${this._escape(icon)}"></ha-icon><span><small>${this._escape(label)}</small><strong data-role="info-value">${this._escape(available ? String(value) : this._t("common.notAvailable"))}</strong></span></button>`;
 	}
 
 	_versionTile(icon, label, entityId) {
@@ -1996,7 +2021,13 @@ class HaServerHealthCard extends HTMLElement {
 			return `${index ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
 		}).join(" ") : "";
 		const area = path ? `${path} L120,26 L0,26 Z` : "";
-		return `<button type="button" class="mini-graph ${options.tone || "blue"} ${healthLevel}" data-metric-entity="${this._escape(entityId || "")}" data-metric-options="${this._escape(JSON.stringify(options))}"${entityId ? ` data-more-info="${this._escape(entityId)}"` : ""}>${path ? `<svg viewBox="0 0 120 26" preserveAspectRatio="none" aria-hidden="true"><path class="mini-area" d="${area}"></path><path class="mini-line" d="${path}"></path></svg>` : `<svg viewBox="0 0 120 26" preserveAspectRatio="none" aria-hidden="true"><path class="mini-area" d=""></path><path class="mini-line" d=""></path></svg>`}<ha-icon icon="${icon}"></ha-icon><span><small>${label}</small><strong data-role="metric-value">${shown}${Number.isFinite(raw) && unit ? ` ${this._escape(unit)}` : ""}</strong>${variation ? `<small class="metric-variation"${variationTooltip ? ` title="${this._escape(variationTooltip)}"` : ""}>${this._escape(variation)}</small>` : ""}</span></button>`;
+		const missing = !entityId || !state;
+		const interaction = !missing
+			? ` data-more-info="${this._escape(entityId)}"`
+			: options.missingNavigate
+				? ` data-navigate="${this._escape(options.missingNavigate)}" title="${this._escape(options.missingTooltip || "")}" aria-label="${this._escape(`${label}: ${this._t("common.notAvailable")}. ${options.missingTooltip || ""}`)}"`
+				: "";
+		return `<button type="button" class="mini-graph ${options.tone || "blue"} ${healthLevel} ${missing && options.missingNavigate ? "is-missing" : ""}" data-metric-entity="${this._escape(entityId || "")}" data-metric-options="${this._escape(JSON.stringify(options))}"${interaction}>${path ? `<svg viewBox="0 0 120 26" preserveAspectRatio="none" aria-hidden="true"><path class="mini-area" d="${area}"></path><path class="mini-line" d="${path}"></path></svg>` : `<svg viewBox="0 0 120 26" preserveAspectRatio="none" aria-hidden="true"><path class="mini-area" d=""></path><path class="mini-line" d=""></path></svg>`}<ha-icon icon="${icon}"></ha-icon><span><small>${label}</small><strong data-role="metric-value">${shown}${Number.isFinite(raw) && unit ? ` ${this._escape(unit)}` : ""}</strong>${variation ? `<small class="metric-variation"${variationTooltip ? ` title="${this._escape(variationTooltip)}"` : ""}>${this._escape(variation)}</small>` : ""}</span></button>`;
 	}
 
 	_dataSizeToBytes(state) {
@@ -2639,7 +2670,7 @@ class HaServerHealthCard extends HTMLElement {
 			.section-head { display:flex; align-items:center; justify-content:space-between; width:100%; padding:9px 2px 7px; border:0; color:var(--primary-text-color); background:transparent; font:inherit; cursor:pointer; }
 			.section-title,.section-side { display:flex; align-items:center; gap:7px; } .section-title { font-size:var(--sh-font-section); font-weight:var(--sh-weight-medium); } .section-side { min-width:0; } .section-summary { display:none; align-items:center; gap:9px; min-width:0; white-space:nowrap; } .section.collapsed .section-summary { display:flex; } .section-summary-item { display:inline-flex; align-items:baseline; gap:3px; color:var(--primary-text-color); font-size:10px; font-weight:600; } .section-summary-item:not(:last-child)::after { content:"·"; margin-left:6px; color:var(--divider-color); font-weight:400; } .section-summary-item b { color:var(--secondary-text-color); font-size:9px; font-weight:400; } .section-summary-item.warning,.section-summary-item.warning b { color:var(--orange); } .section-summary-item.critical,.section-summary-item.critical b { color:var(--red); } .backup-section-summary { gap:0; } .backup-summary-size { display:inline-flex; align-items:center; color:var(--primary-text-color); font-size:10px; font-weight:600; white-space:nowrap; } .backup-summary-size.warning { color:var(--orange); } .backup-summary-size.critical { color:var(--red); } .backup-summary-size::after { content:"·"; margin:0 7px; color:var(--divider-color); font-weight:400; } .backup-result-pill { color:inherit; } .backup-result-pill.ok { color:var(--green); background:color-mix(in srgb,var(--green) 14%,transparent); } .backup-result-pill.failed { color:var(--red); background:color-mix(in srgb,var(--red) 14%,transparent); } .backup-result-pill.unknown { color:var(--secondary-text-color); background:color-mix(in srgb,var(--secondary-text-color) 12%,transparent); } .network-section-summary { gap:10px; overflow:hidden; } .network-summary-interface { display:inline-flex; align-items:baseline; gap:5px; min-width:0; font-size:9px; white-space:nowrap; } .network-summary-interface:not(:last-child)::after { content:"·"; margin-left:5px; color:var(--divider-color); } .network-summary-interface b { color:var(--secondary-text-color); font-size:9px; font-weight:400; } .network-summary-download,.network-summary-upload { display:inline-flex; align-items:baseline; gap:3px; min-width:0; } .network-summary-download i,.network-summary-upload i { color:var(--secondary-text-color); font-style:normal; font-size:9px; font-weight:400; } .network-summary-download strong,.network-summary-upload strong { color:var(--primary-text-color); font-size:10px; font-weight:600; } .section-title ha-icon { color:var(--primary-color); --mdc-icon-size:19px; }
 			.section-body { padding:0 0 8px; } .section.collapsed .section-body { display:none; }
-			.system-metric-group + .system-metric-group { margin-top:10px; } .system-metric-group > .instance-group-title { margin-bottom:6px; } .resource-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; } .core-resource-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+			.system-metric-group + .system-metric-group { margin-top:10px; } .system-metric-group > .instance-group-title { margin-bottom:6px; } .resource-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; } .core-resource-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } .supervisor-resource-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 			.resource { min-width:0; padding:9px; border-radius:10px; background:var(--ha-server-tile-background); }
 			.resource-label { display:flex; align-items:center; gap:5px; color:var(--secondary-text-color); font-size:10px; font-weight:700; } .resource-label ha-icon { --mdc-icon-size:17px; }
 			.resource-value { margin-top:6px; color:var(--primary-text-color); font-size:20px; font-weight:700; line-height:1; } .resource-value small { margin-left:2px; font-size:11px; }
@@ -2662,7 +2693,7 @@ class HaServerHealthCard extends HTMLElement {
 			.version-tile.has-update { border-color:var(--orange); } .version-tile.has-update ha-icon,.version-tile.has-update em { color:var(--orange); }
 			.instance-group { margin-top:8px; padding:9px 10px 10px; border:1px solid var(--divider-color); border-radius:9px; background:var(--ha-server-tile-background); } .instance-group-title { margin:0 0 8px; color:var(--secondary-text-color); font-size:var(--sh-font-small); font-weight:var(--sh-weight-medium); line-height:1.2; text-transform:uppercase; letter-spacing:.04em; } .instance-summary { display:grid; gap:10px 14px; } .configuration-summary { grid-template-columns:repeat(var(--configuration-columns,5),minmax(0,1fr)); } .entities-summary { grid-template-columns:repeat(4,minmax(0,1fr)); }
 			.instance-stat { display:flex; flex-direction:column; min-width:0; padding:0; border:0; color:inherit; background:transparent; font:inherit; text-align:left; cursor:default; } .instance-stat.is-clickable { cursor:pointer; } .instance-stat.is-clickable:hover strong,.instance-stat.is-clickable:focus-visible strong { color:var(--primary-color); } .instance-stat.is-clickable:focus-visible { outline:1px solid var(--primary-color); outline-offset:3px; border-radius:4px; } .instance-stat strong { color:var(--primary-text-color); font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); line-height:1.2; } .instance-stat small { margin-top:2px; overflow:hidden; color:var(--secondary-text-color); font-size:var(--sh-font-small); line-height:1.2; text-overflow:ellipsis; white-space:nowrap; } .instance-stat.warning strong,.instance-stat.warning small { color:var(--orange); }
-			.system-info-tile strong { white-space:normal; overflow-wrap:anywhere; }
+			.system-info-tile strong { white-space:normal; overflow-wrap:anywhere; } .optional-integration-tile.is-missing,.mini-graph.is-missing { cursor:help; } .optional-integration-tile.is-missing ha-icon,.optional-integration-tile.is-missing strong,.mini-graph.is-missing ha-icon,.mini-graph.is-missing strong { color:var(--secondary-text-color); }
 			.network-interfaces { display:grid; gap:9px; } .network-interface + .network-interface { padding-top:9px; border-top:1px solid var(--divider-color); } .info-grid,.traffic-grid,.health-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; margin-top:7px; }
 			.info,.traffic,.health-item { display:flex; align-items:center; gap:8px; min-width:0; padding:9px; border-radius:9px; background:var(--ha-server-tile-background); }
 			.info ha-icon,.traffic ha-icon,.health-item ha-icon { flex:0 0 auto; --mdc-icon-size:21px; } .info div,.traffic div,.health-item div { min-width:0; } .info span,.traffic span,.health-item span { display:block; color:var(--secondary-text-color); font-size:9px; } .info strong,.traffic strong,.health-item strong { display:block; margin-top:2px; color:var(--primary-text-color); font-size:12px; overflow:hidden; text-overflow:ellipsis; }
