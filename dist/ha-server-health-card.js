@@ -2509,10 +2509,18 @@ class HaServerHealthCard extends HTMLElement {
 		history.pushState(null, "", path);
 		window.dispatchEvent(new CustomEvent("location-changed"));
 	}
+	_navigateBackup(path) {
+		if (!path || typeof path !== "string") return;
+		window.location.assign(path);
+	}
 
 	_bindNavigation(root = this.shadowRoot) {
 		root.querySelectorAll("[data-navigate]").forEach((element) => {
-			element.addEventListener("click", () => this._navigate(element.dataset.navigate));
+			element.addEventListener("click", () => {
+				const path = element.dataset.navigate;
+				if (element.classList.contains("backup-detail-row")) this._navigateBackup(path);
+				else this._navigate(path);
+			});
 		});
 	}
 
