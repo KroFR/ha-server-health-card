@@ -120,6 +120,8 @@ const TRANSLATIONS = {
 		databaseGrowth7d: "Growth · 7 days",
 		recorder: "Recorder",
 		backlog: "Backlog",
+		host: "Host",
+		homeAssistantCore: "Home Assistant Core",
 		running: "Running",
 		notRunning: "Not running",
 		containers: "System containers",
@@ -294,6 +296,8 @@ const TRANSLATIONS = {
 		databaseGrowth7d: "Croissance · 7 jours",
 		recorder: "Recorder",
 		backlog: "File d’attente",
+		host: "Hôte",
+		homeAssistantCore: "Home Assistant Core",
 		running: "En marche",
 		notRunning: "Arrêté",
 		containers: "Conteneurs système",
@@ -458,7 +462,8 @@ class HaServerHealthCard extends HTMLElement {
 		this._backupDetailsOpen = false;
 		this._recorderInfo = { loading: false, loadedAt: 0, data: null };
 		this._databaseHistory7d = { key: "", loading: false, loadedAt: 0, points: [] };
-		this._containersApps = { infoLoading: false, statsLoading: false, infoLoadedAt: 0, statsLoadedAt: 0, systems: [], apps: [] };
+		this._containersApps = { loading: false, loadedAt: 0, systems: [], apps: [] };
+		this._containerRecorderMetrics = { loadedAt: 0, series: {}, core: null };
 		this._containersAppsLoadPromise = null;
 		this._containersAppsRefreshTimer = null;
 		this._containerGroupsCollapsed = new Set(["systems", "apps"]);
@@ -915,98 +920,227 @@ class HaServerHealthCard extends HTMLElement {
 		this._refreshDynamicContent(["home-assistant", "storage", "updates"]);
 	}
 
-	_systemContainerDefinitions() {
-		return [["core","Home Assistant Core","mdi:home-assistant"],["supervisor","Supervisor","mdi:shield-home"],["audio","Audio","mdi:volume-high"],["cli","CLI","mdi:console"],["dns","DNS","mdi:dns"],["multicast","Multicast","mdi:access-point-network"],["observer","Observer","mdi:eye-outline"]];
+	async _supervisorGet(endpoint) {
+		return this._hass.callWS({ type: "supervisor/api", endpoint, method: "get" });
 	}
-	async _supervisorGet(endpoint) { return this._hass.callWS({ type:"supervisor/api", endpoint, method:"get" }); }
+
+	_systemContainerDefinitions() {
+		return [
+			["core", "Home Assistant Core", "mdi:home-assistant"],
+			["supervisor", "Supervisor", "mdi:shield-home"],
+			["audio", "Audio", "mdi:volume-high"],
+			["cli", "CLI", "mdi:console"],
+			["dns", "DNS", "mdi:dns"],
+			["multicast", "Multicast", "mdi:access-point-network"],
+			["observer", "Observer", "mdi:eye-outline"],
+		];
+	}
 
 	_startContainersAppsRefresh() {
 		if (!this.isConnected || !this._hass || !this._config) return;
 		if (this._containersAppsRefreshTimer) clearInterval(this._containersAppsRefreshTimer);
 		this._loadContainersApps();
-		this._containersAppsRefreshTimer = setInterval(() => this._loadContainersApps(), 60000);
+		this._containersAppsRefreshTimer = setInterval(() => this._loadContainersApps(), 300000);
+	}
+
+	_normalizeContainerIdentity(value) {
+		return String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+	}
+
+	_containerMetric(entry, metric, statisticIds) {
+		const state = this._state(entry?.entity_id);
+		if (!state || entry?.disabled_by != null || entry?.hidden) return null;
+		if (!statisticIds.has(entry.entity_id) || state.attributes?.state_class !== "measurement") return null;
+		if (state.attributes?.unit_of_measurement !== "%" || !Number.isFinite(Number(state.state))) return null;
+		const text = this._normalizeContainerIdentity([
+			entry.entity_id, entry.unique_id, entry.translation_key,
+			entry.original_name, state.attributes?.friendly_name,
+		].join(" "));
+		if (metric === "cpu") {
+			return text.includes("cpu") && !/temperature|frequency|load average/.test(text) ? entry.entity_id : null;
+		}
+		return /(memory|ram)/.test(text) && !/free|available|limit|swap/.test(text) ? entry.entity_id : null;
+	}
+
+	_deviceMetrics(entries, statisticIds) {
+		const candidates = (metric) => entries
+			.map((entry) => this._containerMetric(entry, metric, statisticIds))
+			.filter(Boolean);
+		const cpu = candidates("cpu");
+		const ram = candidates("ram");
+		return {
+			cpuEntity: cpu.length === 1 ? cpu[0] : null,
+			ramEntity: ram.length === 1 ? ram[0] : null,
+		};
+	}
+
+	_deviceIdentityText(device) {
+		return this._normalizeContainerIdentity([
+			device?.name, device?.name_by_user, device?.manufacturer,
+			device?.model, JSON.stringify(device?.identifiers || []),
+		].join(" "));
+	}
+
+	_metricMatch(devices, metricsByDevice, scoreDevice) {
+		const matches = devices
+			.map((device) => ({ device, metrics: metricsByDevice.get(device.id), score: scoreDevice(device) }))
+			.filter((match) => match.score > 0)
+			.sort((left, right) => right.score - left.score);
+		if (!matches.length || (matches[1] && matches[0].score === matches[1].score)) return null;
+		return matches[0];
+	}
+
+	_systemMatchScore(device, id, name) {
+		const identifiers = JSON.stringify(device?.identifiers || []).toLowerCase();
+		const text = this._deviceIdentityText(device);
+		let score = 0;
+		if (identifiers.includes(`hassio_${id}`) || identifiers.includes(`hassio ${id}`)) score += 200;
+		if (text.includes(this._normalizeContainerIdentity(name))) score += 100;
+		if (text.includes(this._normalizeContainerIdentity(id))) score += 20;
+		return score;
+	}
+
+	_addonMatchScore(device, addon) {
+		const slug = String(addon?.slug || "").toLowerCase();
+		const identifiers = JSON.stringify(device?.identifiers || []).toLowerCase();
+		const configurationUrl = String(device?.configuration_url || "").toLowerCase();
+
+		if (slug && configurationUrl.endsWith(`/config/app/${slug}`)) return 300;
+		if (slug && identifiers.includes(slug)) return 200;
+
+		const deviceName = this._normalizeContainerIdentity(device?.name_by_user || device?.name);
+		const addonName = this._normalizeContainerIdentity(addon?.name);
+		return deviceName && addonName && deviceName === addonName ? 100 : 0;
+	}
+
+	_latestRecorderMean(entityId) {
+		const points = this._containerRecorderMetrics.series?.[entityId] || [];
+		return points.length ? points.at(-1).value : null;
 	}
 
 	async _loadContainersApps() {
 		if (this._containersAppsLoadPromise) return this._containersAppsLoadPromise;
 		this._containersAppsLoadPromise = (async () => {
-			if (!this._hass?.callWS || this._hass?.user?.is_admin !== true || this._config?.show_containers_apps === false) {
-				const hadData = this._containersApps.systems.length || this._containersApps.apps.length;
-				this._containersApps = { infoLoading:false, statsLoading:false, infoLoadedAt:0, statsLoadedAt:0, systems:[], apps:[] };
-				if (hadData) this._refreshDynamicContent(["containers-apps"]);
-				return;
+			if (!this._hass?.callWS || this._hass?.user?.is_admin !== true || this._config?.show_containers_apps === false) return;
+			if (this._containersApps.loadedAt && Date.now() - this._containersApps.loadedAt < 300000) return;
+
+			const definitions = this._systemContainerDefinitions();
+			const [devices, entities, metadata, addonsResponse, infoResults] = await Promise.all([
+				this._hass.callWS({ type: "config/device_registry/list" }),
+				this._hass.callWS({ type: "config/entity_registry/list" }),
+				this._hass.callWS({ type: "recorder/list_statistic_ids", statistic_type: "mean" }),
+				this._supervisorGet("/addons"),
+				Promise.allSettled(definitions.map(([id]) => this._supervisorGet(`/${id}/info`))),
+			]);
+
+			const statisticIds = new Set((metadata || []).map((item) => item.statistic_id));
+			const entitiesByDevice = new Map();
+			for (const entry of entities || []) {
+				if (!entry.device_id) continue;
+				if (!entitiesByDevice.has(entry.device_id)) entitiesByDevice.set(entry.device_id, []);
+				entitiesByDevice.get(entry.device_id).push(entry);
 			}
-			const startedAt = Date.now();
-			const loadInfo = startedAt - this._containersApps.infoLoadedAt >= 300000;
-			const loadStats = startedAt - this._containersApps.statsLoadedAt >= 60000;
-			if (!loadInfo && !loadStats) return;
-			const previousData = JSON.stringify([this._containersApps.systems, this._containersApps.apps]);
-			let systems = this._containersApps.systems;
-			let apps = this._containersApps.apps;
-			this._containersApps = { ...this._containersApps, infoLoading:loadInfo, statsLoading:loadStats };
-			const defs = this._systemContainerDefinitions();
-			const systemStatsPromise = loadStats
-				? Promise.allSettled(defs.map(([id]) => this._supervisorGet(`/${id}/stats`)))
-				: Promise.resolve([]);
-			const infoPromise = loadInfo
-				? Promise.all([
-					Promise.allSettled(defs.map(async ([id,name,icon]) => ({ id, name, icon, info:await this._supervisorGet(`/${id}/info`) }))),
-					this._supervisorGet("/addons").catch(() => null),
-				])
-				: Promise.resolve([null, null]);
-			const [systemStats, [systemInfo, addons]] = await Promise.all([systemStatsPromise, infoPromise]);
-			if (loadInfo) {
-				const previousSystems = new Map(systems.map(item => [item.id, item]));
-				systems = systemInfo.filter(result => result.status === "fulfilled").map(result => ({ ...result.value, stats:previousSystems.get(result.value.id)?.stats || null }));
-				const raw = addons?.data?.addons ?? addons?.addons ?? [];
-				const previousApps = new Map(apps.map(item => [item.slug, item]));
-				apps = Array.isArray(raw) ? raw.map(app => ({ ...app, stats:previousApps.get(app.slug)?.stats || null })) : [];
-			}
-			if (loadStats) {
-				const statsById = new Map(defs.map(([id], index) => [id, systemStats[index]]));
-				systems = systems.map(item => {
-					const result = statsById.get(item.id);
-					return { ...item, stats:result?.status === "fulfilled" ? result.value : item.stats };
+			const metricsByDevice = new Map((devices || []).map((device) => [
+				device.id,
+				this._deviceMetrics(entitiesByDevice.get(device.id) || [], statisticIds),
+			]));
+
+			const systems = definitions.map(([id, name, icon], index) => {
+				const match = this._metricMatch(
+					devices || [], metricsByDevice,
+					(device) => this._systemMatchScore(device, id, name),
+				);
+				const infoResult = infoResults[index];
+				return {
+					id, name, icon,
+					info: infoResult?.status === "fulfilled" ? infoResult.value : {},
+					runtimeStatus: infoResult?.status === "fulfilled" ? "running" : "unknown",
+					cpuEntity: match?.metrics?.cpuEntity || null,
+					ramEntity: match?.metrics?.ramEntity || null,
+				};
+			});
+
+			const rawAddons = addonsResponse?.data?.addons ?? addonsResponse?.addons ?? [];
+			const apps = (Array.isArray(rawAddons) ? rawAddons : []).map((addon) => {
+				const match = this._metricMatch(
+					devices || [], metricsByDevice,
+					(device) => this._addonMatchScore(device, addon),
+				);
+				return {
+					...addon,
+					cpuEntity: match?.metrics?.cpuEntity || null,
+					ramEntity: match?.metrics?.ramEntity || null,
+				};
+			});
+
+			const metricIds = [...new Set([...systems, ...apps]
+				.flatMap((item) => [item.cpuEntity, item.ramEntity]).filter(Boolean))];
+			let series = {};
+			if (metricIds.length) {
+				const end = new Date();
+				const start = new Date(end.getTime() - 24 * 3600000);
+				const result = await this._hass.callWS({
+					type: "recorder/statistics_during_period",
+					start_time: start.toISOString(), end_time: end.toISOString(),
+					statistic_ids: metricIds, period: "5minute", types: ["mean"],
 				});
-				const appStats = await Promise.allSettled(apps.map(item => item.state === "started" ? this._supervisorGet(`/addons/${item.slug}/stats`) : Promise.resolve(null)));
-				apps = apps.map((item, index) => ({ ...item, stats:item.state === "started" && appStats[index]?.status === "fulfilled" ? appStats[index].value : null }));
+				series = Object.fromEntries(metricIds.map((entityId) => [entityId,
+					(result?.[entityId] || [])
+						.map((point) => ({ timestamp: Number(point.start), value: Number(point.mean) }))
+						.filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.value)),
+				]));
 			}
-			const completedAt = Date.now();
-			this._containersApps = {
-				infoLoading:false,
-				statsLoading:false,
-				infoLoadedAt:loadInfo && (systems.length || apps.length) ? completedAt : this._containersApps.infoLoadedAt,
-				statsLoadedAt:loadStats && (systems.length || apps.length) ? completedAt : this._containersApps.statsLoadedAt,
-				systems,
-				apps,
+
+			const loadedAt = Date.now();
+			this._containerRecorderMetrics = {
+				loadedAt, series,
+				core: systems.find((item) => item.id === "core") || null,
 			};
-			if (previousData !== JSON.stringify([systems, apps])) this._refreshDynamicContent(["containers-apps"]);
-		})().catch(error => {
-			console.debug("[ha-server-health-card][containers-apps] Unable to load containers and Apps", error);
-			this._containersApps = { ...this._containersApps, infoLoading:false, statsLoading:false };
+			this._containersApps = { loading: false, loadedAt, systems, apps };
+			this._refreshDynamicContent(["containers-apps", "system"]);
+		})().catch((error) => {
+			console.debug("[ha-server-health-card][containers-apps] Unable to load Recorder metrics", error);
 		}).finally(() => {
 			this._containersAppsLoadPromise = null;
 		});
 		return this._containersAppsLoadPromise;
 	}
 
-	_containerStatsText(stats) { if(!stats)return this._t("common.notAvailable"); const cpu=Number.isFinite(Number(stats.cpu_percent))?`${new Intl.NumberFormat(this._language(),{maximumFractionDigits:2}).format(Number(stats.cpu_percent))}%`:"--"; const ram=Number.isFinite(Number(stats.memory_percent))?`${new Intl.NumberFormat(this._language(),{maximumFractionDigits:1}).format(Number(stats.memory_percent))}%`:"--"; const mem=Number.isFinite(Number(stats.memory_usage))?this._formatBytes(Number(stats.memory_usage)):"--"; return `${this._t("labels.cpuShort")} ${cpu} · ${this._t("labels.ramShort")} ${ram} · ${mem}`; }
+	_containerStatsText(item) {
+		const cpu = this._latestRecorderMean(item?.cpuEntity);
+		const ram = this._latestRecorderMean(item?.ramEntity);
+		const format = (value, digits) => Number.isFinite(value)
+			? `${new Intl.NumberFormat(this._language(), { maximumFractionDigits: digits }).format(value)}%`
+			: "--";
+		return `${this._t("labels.cpuShort")} ${format(cpu, 2)} · ${this._t("labels.ramShort")} ${format(ram, 1)}`;
+	}
+
+	_systemContainerStatus(item) {
+		const status = String(item?.runtimeStatus || "").trim().toLowerCase();
+		return ["running", "stopped"].includes(status) ? status : "unknown";
+	}
 
 	_renderContainerRow(item, app=false) {
 		const info = app ? item : item.info || {};
-		const running = app ? item.state === "started" : Boolean(item.stats);
-		const status = running ? this._t("labels.running") : app ? this._t("labels.stopped") : this._t("common.notAvailable");
+		const systemStatus = app ? null : this._systemContainerStatus(item);
+		const running = app ? item.state === "started" : systemStatus === "running";
+		const stopped = app ? item.state !== "started" : systemStatus === "stopped";
+		const status = running
+			? this._t("labels.running")
+			: stopped
+				? this._t("labels.stopped")
+				: this._t("common.notAvailable");
 		const statusIcon = running ? "mdi:play" : "mdi:stop";
-		const version = info.version || "--";
+		const version = info.version || item.version || "--";
 		const subtitle = app ? `${item.slug} · ${version}` : `hassio_${item.id} · ${version}`;
-		return `<div class="container-row ${running ? "running" : "stopped"}"><div class="container-icon"><ha-icon icon="${app ? "mdi:docker" : item.icon}"></ha-icon></div><div class="container-main"><strong>${this._escape(item.name)}</strong><small>${this._escape(subtitle)}</small></div><small class="container-status"><ha-icon icon="${statusIcon}"></ha-icon>${this._escape(status)}</small><div class="container-stats"><strong>${this._escape(this._containerStatsText(item.stats))}</strong></div></div>`;
+		return `<div class="container-row ${running ? "running" : "stopped"}"><div class="container-icon"><ha-icon icon="${app ? "mdi:docker" : item.icon}"></ha-icon></div><div class="container-main"><strong>${this._escape(item.name)}</strong><small>${this._escape(subtitle)}</small></div><small class="container-status"><ha-icon icon="${statusIcon}"></ha-icon>${this._escape(status)}</small><div class="container-stats"><strong>${this._escape(this._containerStatsText(item))}</strong></div></div>`;
 	}
 
 	_renderContainersApps() {
 		if (this._hass?.user?.is_admin !== true) return "";
 		const systems = this._containersApps.systems || [];
 		const apps = this._containersApps.apps || [];
-		const runningSystems = systems.filter((item) => item.stats).length;
+		const runningSystems = systems.filter((item) => this._systemContainerStatus(item) === "running").length;
 		const runningApps = apps.filter((item) => item.state === "started").length;
 		const total = systems.length + apps.length;
 		const running = runningSystems + runningApps;
@@ -1363,13 +1497,13 @@ class HaServerHealthCard extends HTMLElement {
 	_sectionSignature(id) {
 		const e = this._entities;
 		if (id === "home-assistant") return JSON.stringify([this._registryCounts, this._stateSignature(e.haCoreUpdate), this._stateSignature(e.supervisorUpdate), this._stateSignature(e.haOsUpdate), this._stateSignature(e.backupStatus)]);
-		if (id === "system") return JSON.stringify([this._stateSignature(e.cpu), this._stateSignature(e.memory), this._stateSignature(e.disk), this._stateSignature(e.database), this._stateSignature(e.ipv4), this._stateSignature(e.uptime), this._metricHistory.loadedAt]);
+		if (id === "system") return JSON.stringify([this._stateSignature(e.cpu), this._stateSignature(e.memory), this._stateSignature(e.disk), this._stateSignature(e.database), this._stateSignature(e.ipv4), this._stateSignature(e.uptime), this._metricHistory.loadedAt,this._containerRecorderMetrics.loadedAt]);
 		if (id === "network") return JSON.stringify([
 			...this._systemMonitorNetworks().flatMap(([, values]) => [this._stateSignature(values.networkIn), this._stateSignature(values.networkOut)]),
 			this._metricHistory.loadedAt,
 		]);
 		if (id === "database") return JSON.stringify([this._stateSignature(e.database), this._databaseHistory7d.loadedAt, this._recorderInfo.loadedAt]);
-		if (id === "containers-apps") return JSON.stringify([this._containersApps.infoLoadedAt, this._containersApps.statsLoadedAt]);
+		if (id === "containers-apps") return JSON.stringify([this._containersApps.loadedAt,this._containerRecorderMetrics.loadedAt]);
 		if (id === "storage") return JSON.stringify(Object.values(this._hass?.states || {}).filter((state) => /disk|swap/.test(state.entity_id)).map((state) => [state.entity_id, state.state, state.last_updated]));
 		if (id === "updates") return JSON.stringify(this._availableUpdates().map((state) => this._stateSignature(state.entity_id)));
 		if (id === "backups") return JSON.stringify([this._stateSignature(e.backupStatus), this._stateSignature(e.lastBackupSize), this._stateSignature(e.lastBackup), this._stateSignature(e.nextBackup), this._localePreferencesSignature(), this._backupManager.loadedAt]);
@@ -1439,7 +1573,7 @@ class HaServerHealthCard extends HTMLElement {
 		this._updateLiveMetrics();
 		const ids = forceIds || ["home-assistant", "storage", "updates", "backups"];
 		for (const id of ids) {
-			if (id === "system" || id === "network") continue;
+			if (!forceIds && (id === "system" || id === "network")) continue;
 			const signature = this._sectionSignature(id);
 			if (!forceIds && signature === this._sectionSignatures.get(id)) continue;
 			this._sectionSignatures.set(id, signature);
@@ -1643,18 +1777,39 @@ class HaServerHealthCard extends HTMLElement {
 	}
 
 	_renderSystem() {
-		const metrics = [
-			["cpu", "mdi:cpu-64-bit", this._t("labels.cpu"), "%", "blue"],
-			["memory", "mdi:memory", this._t("labels.memory"), "%", "purple"],
-			["disk", "mdi:harddisk", this._t("labels.disk"), "%", "dusty-pink"],
+		const hostMetrics = [
+			["cpu", "mdi:cpu-64-bit", this._t("labels.cpu"), "blue"],
+			["memory", "mdi:memory", this._t("labels.memory"), "purple"],
+			["disk", "mdi:harddisk", this._t("labels.disk"), "dusty-pink"],
 		];
-		return this._renderSection("system", "mdi:server", this._t("sections.system"), `
-			<div class="resource-grid">${metrics.map(([key, icon, label, unit, tone]) => this._miniGraphTile(icon, label, this._entities[key], { unit, tone, decimals: 0, healthMetric: key })).join("")}</div>
-			<div class="system-info-grid">
-				${this._systemInfoTile("mdi:ip-network", `${this._t("labels.ipv4")}${this._networkInterface() ? ` (${this._escape(this._networkInterface())})` : ""}`, this._formatEntity(this._entities.ipv4, { raw: true }), this._entities.ipv4)}
-				${this._systemInfoTile("mdi:clock-outline", this._t("labels.uptime"), this._formatUptime(this._entities.uptime), this._entities.uptime)}
-			</div>
-		`, this._sectionSummary("system"));
+		const core = this._containerRecorderMetrics.core;
+		const hostGroup = `
+			<div class="system-metric-group">
+				<div class="instance-group-title">${this._escape(this._t("labels.host"))}</div>
+				<div class="resource-grid">${hostMetrics.map(([key, icon, label, tone]) => this._miniGraphTile(
+					icon, label, this._entities[key], { unit: "%", tone, decimals: 0, healthMetric: key },
+				)).join("")}</div>
+				<div class="system-info-grid">
+					${this._systemInfoTile("mdi:ip-network", `${this._t("labels.ipv4")}${this._networkInterface() ? ` (${this._escape(this._networkInterface())})` : ""}`, this._formatEntity(this._entities.ipv4, { raw: true }), this._entities.ipv4)}
+					${this._systemInfoTile("mdi:clock-outline", this._t("labels.uptime"), this._formatUptime(this._entities.uptime), this._entities.uptime)}
+				</div>
+			</div>`;
+		const coreGroup = core ? `
+			<div class="system-metric-group">
+				<div class="instance-group-title">${this._escape(this._t("labels.homeAssistantCore"))}</div>
+				<div class="resource-grid core-resource-grid">
+					${[
+						[core.cpuEntity, "mdi:cpu-64-bit", this._t("labels.cpu"), "blue"],
+						[core.ramEntity, "mdi:memory", this._t("labels.memory"), "purple"],
+					].map(([entityId, icon, label, tone]) => this._miniGraphTile(
+						icon, label, entityId, { unit: "%", tone, decimals: 1, recorderMetric: true },
+					)).join("")}
+				</div>
+			</div>` : "";
+		return this._renderSection(
+			"system", "mdi:server", this._t("sections.system"),
+			`${hostGroup}${coreGroup}`, this._sectionSummary("system"),
+		);
 	}
 
 	_systemInfoTile(icon, label, value, entityId) {
@@ -1767,7 +1922,12 @@ class HaServerHealthCard extends HTMLElement {
 
 	_miniGraphTile(icon, label, entityId, options = {}) {
 		const state = this._state(entityId);
-		const raw = this._numericState(entityId);
+		const recorderSeries = options.recorderMetric
+			? (this._containerRecorderMetrics.series?.[entityId] || [])
+			: null;
+		const raw = options.recorderMetric
+			? (recorderSeries.at(-1)?.value ?? null)
+			: this._numericState(entityId);
 		const decimals = options.decimals ?? 1;
 		const sourceUnit = state?.attributes?.unit_of_measurement || options.unit || "";
 		let displayValue = raw;
@@ -1789,14 +1949,16 @@ class HaServerHealthCard extends HTMLElement {
 		const healthLevel = options.healthMetric ? this._metricHealthLevel(options.healthMetric, raw) : "";
 		const end = Date.now();
 		const start = end - 24 * 3600000;
-		const history = this._groupHistory(this._metricHistory.series[entityId] || [], start, end);
+		const history = options.recorderMetric
+			? recorderSeries.filter((point) => point.timestamp >= start && point.timestamp <= end).map((point) => ({ ...point }))
+			: this._groupHistory(this._metricHistory.series[entityId] || [], start, end);
 
 		if (history.length) {
 			const first = history[0];
 			if (first.timestamp > start) history.unshift({ timestamp: start, value: first.value });
 			else first.timestamp = start;
 		}
-		if (Number.isFinite(raw)) {
+		if (Number.isFinite(raw) && !options.recorderMetric) {
 			const last = history[history.length - 1];
 			if (!last || end - last.timestamp > 1000) history.push({ timestamp: end, value: raw });
 			else {
@@ -2462,7 +2624,7 @@ class HaServerHealthCard extends HTMLElement {
 			.section-head { display:flex; align-items:center; justify-content:space-between; width:100%; padding:9px 2px 7px; border:0; color:var(--primary-text-color); background:transparent; font:inherit; cursor:pointer; }
 			.section-title,.section-side { display:flex; align-items:center; gap:7px; } .section-title { font-size:var(--sh-font-section); font-weight:var(--sh-weight-medium); } .section-side { min-width:0; } .section-summary { display:none; align-items:center; gap:9px; min-width:0; white-space:nowrap; } .section.collapsed .section-summary { display:flex; } .section-summary-item { display:inline-flex; align-items:baseline; gap:3px; color:var(--primary-text-color); font-size:10px; font-weight:600; } .section-summary-item:not(:last-child)::after { content:"·"; margin-left:6px; color:var(--divider-color); font-weight:400; } .section-summary-item b { color:var(--secondary-text-color); font-size:9px; font-weight:400; } .section-summary-item.warning,.section-summary-item.warning b { color:var(--orange); } .section-summary-item.critical,.section-summary-item.critical b { color:var(--red); } .backup-section-summary { gap:0; } .backup-summary-size { display:inline-flex; align-items:center; color:var(--primary-text-color); font-size:10px; font-weight:600; white-space:nowrap; } .backup-summary-size.warning { color:var(--orange); } .backup-summary-size.critical { color:var(--red); } .backup-summary-size::after { content:"·"; margin:0 7px; color:var(--divider-color); font-weight:400; } .backup-result-pill { color:inherit; } .backup-result-pill.ok { color:var(--green); background:color-mix(in srgb,var(--green) 14%,transparent); } .backup-result-pill.failed { color:var(--red); background:color-mix(in srgb,var(--red) 14%,transparent); } .backup-result-pill.unknown { color:var(--secondary-text-color); background:color-mix(in srgb,var(--secondary-text-color) 12%,transparent); } .network-section-summary { gap:10px; overflow:hidden; } .network-summary-interface { display:inline-flex; align-items:baseline; gap:5px; min-width:0; font-size:9px; white-space:nowrap; } .network-summary-interface:not(:last-child)::after { content:"·"; margin-left:5px; color:var(--divider-color); } .network-summary-interface b { color:var(--secondary-text-color); font-size:9px; font-weight:400; } .network-summary-download,.network-summary-upload { display:inline-flex; align-items:baseline; gap:3px; min-width:0; } .network-summary-download i,.network-summary-upload i { color:var(--secondary-text-color); font-style:normal; font-size:9px; font-weight:400; } .network-summary-download strong,.network-summary-upload strong { color:var(--primary-text-color); font-size:10px; font-weight:600; } .section-title ha-icon { color:var(--primary-color); --mdc-icon-size:19px; }
 			.section-body { padding:0 0 8px; } .section.collapsed .section-body { display:none; }
-			.resource-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; }
+			.system-metric-group + .system-metric-group { margin-top:10px; } .system-metric-group > .instance-group-title { margin-bottom:6px; } .resource-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; } .core-resource-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 			.resource { min-width:0; padding:9px; border-radius:10px; background:var(--ha-server-tile-background); }
 			.resource-label { display:flex; align-items:center; gap:5px; color:var(--secondary-text-color); font-size:10px; font-weight:700; } .resource-label ha-icon { --mdc-icon-size:17px; }
 			.resource-value { margin-top:6px; color:var(--primary-text-color); font-size:20px; font-weight:700; line-height:1; } .resource-value small { margin-left:2px; font-size:11px; }
