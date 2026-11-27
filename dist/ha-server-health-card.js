@@ -2558,6 +2558,7 @@ class HaServerHealthCard extends HTMLElement {
 				button.setAttribute("aria-expanded", String(this._backupDetailsOpen));
 				const icon = button.querySelector(":scope > ha-icon");
 				if (icon) icon.setAttribute("icon", `mdi:chevron-${this._backupDetailsOpen ? "up" : "down"}`);
+				this._saveCollapsedSections();
 			});
 		});
 	}
@@ -2646,7 +2647,7 @@ class HaServerHealthCard extends HTMLElement {
 
 	_normalizeUserPreferences(value) {
 		// Backward compatible with the previous array-only user_data format and health_details_open key.
-		if (Array.isArray(value)) return { collapsedSections: this._normalizeCollapsedSections(value), globalHealthOpen: false, containerGroupsCollapsed: new Set(["systems", "apps"]) };
+		if (Array.isArray(value)) return { collapsedSections: this._normalizeCollapsedSections(value), globalHealthOpen: false, backupDetailsOpen: false, containerGroupsCollapsed: new Set(["systems", "apps"]) };
 		const source = value && typeof value === "object" ? value : {};
 		const hasStoredSections = Array.isArray(source.collapsed_sections);
 		return {
@@ -2654,8 +2655,19 @@ class HaServerHealthCard extends HTMLElement {
 				? this._normalizeCollapsedSections(source.collapsed_sections)
 				: this._defaultCollapsedSections(),
 			globalHealthOpen: source.global_health_open === true || source.health_details_open === true,
+			backupDetailsOpen: source.backup_details_open === true,
 			containerGroupsCollapsed: new Set(Array.isArray(source.container_groups_collapsed) ? source.container_groups_collapsed.filter((key) => ["systems", "apps"].includes(key)) : ["systems", "apps"]),
 		};
+	}
+
+	_applyBackupDetailsState() {
+		const list = this.shadowRoot.querySelector(".backup-details-list");
+		const button = this.shadowRoot.querySelector("[data-toggle-backup-details]");
+		if (list) list.hidden = !this._backupDetailsOpen;
+		if (button) {
+			button.setAttribute("aria-expanded", String(this._backupDetailsOpen));
+			button.querySelector(":scope > ha-icon")?.setAttribute("icon", `mdi:chevron-${this._backupDetailsOpen ? "up" : "down"}`);
+		}
 	}
 
 	_applyHealthDetailsState() {
@@ -2678,21 +2690,25 @@ class HaServerHealthCard extends HTMLElement {
 			const preferences = this._normalizeUserPreferences(response?.value ?? response);
 			this._collapsed = preferences.collapsedSections;
 			this._healthDetailsOpen = preferences.globalHealthOpen;
+			this._backupDetailsOpen = preferences.backupDetailsOpen;
 			this._containerGroupsCollapsed = preferences.containerGroupsCollapsed;
 			this._collapsedLoaded = true;
 			this._applyCollapsedState();
 			this._applyHealthDetailsState();
+			this._applyBackupDetailsState();
 			this._applyContainerGroupsState();
 			this._unsubscribeCollapsed = await this._hass.connection.subscribeMessage((message) => {
 				const next = this._normalizeUserPreferences(message?.value ?? message);
-				const current = JSON.stringify({ collapsed: [...this._collapsed].sort(), health: this._healthDetailsOpen, containerGroups: [...this._containerGroupsCollapsed].sort() });
-				const incoming = JSON.stringify({ collapsed: [...next.collapsedSections].sort(), health: next.globalHealthOpen, containerGroups: [...next.containerGroupsCollapsed].sort() });
+				const current = JSON.stringify({ collapsed: [...this._collapsed].sort(), health: this._healthDetailsOpen, backupDetails: this._backupDetailsOpen, containerGroups: [...this._containerGroupsCollapsed].sort() });
+				const incoming = JSON.stringify({ collapsed: [...next.collapsedSections].sort(), health: next.globalHealthOpen, backupDetails: next.backupDetailsOpen, containerGroups: [...next.containerGroupsCollapsed].sort() });
 				if (current === incoming) return;
 				this._collapsed = next.collapsedSections;
 				this._healthDetailsOpen = next.globalHealthOpen;
+				this._backupDetailsOpen = next.backupDetailsOpen;
 				this._containerGroupsCollapsed = next.containerGroupsCollapsed;
 				this._applyCollapsedState();
 				this._applyHealthDetailsState();
+				this._applyBackupDetailsState();
 				this._applyContainerGroupsState();
 			}, { type: "frontend/subscribe_user_data", key });
 		} catch (error) {
@@ -2715,6 +2731,7 @@ class HaServerHealthCard extends HTMLElement {
 					collapsed_sections: [...this._collapsed],
 					global_health_open: this._healthDetailsOpen,
 					health_details_open: this._healthDetailsOpen,
+					backup_details_open: this._backupDetailsOpen,
 					container_groups_collapsed: [...this._containerGroupsCollapsed],
 				},
 			});
