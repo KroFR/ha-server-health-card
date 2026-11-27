@@ -467,6 +467,7 @@ class HaServerHealthCard extends HTMLElement {
 		this._recorderInfo = { loading: false, loadedAt: 0, data: null };
 		this._databaseHistory7d = { key: "", loading: false, loadedAt: 0, points: [] };
 		this._containersApps = { loading: false, loadedAt: 0, systems: [], apps: [] };
+		this._supervisorAddons = [];
 		this._containerRecorderMetrics = { loadedAt: 0, series: {}, core: null, supervisor: null };
 		this._containersAppsLoadPromise = null;
 		this._containersAppsRefreshTimer = null;
@@ -891,6 +892,7 @@ class HaServerHealthCard extends HTMLElement {
 			const disabledEntityIds = new Set(registryEntities.filter((entry) => entry?.entity_id && entry?.disabled_by != null).map((entry) => entry.entity_id));
 			const enabledEntityIds = new Set([...entityIds].filter((entityId) => !disabledEntityIds.has(entityId)));
 			const addons = supervisor?.data?.addons ?? supervisor?.addons ?? supervisor?.data ?? supervisor;
+			this._supervisorAddons = Array.isArray(addons) ? addons : [];
 			const marketplaceInstalledEntities = registryEntities.filter((entry) => {
 				if (!entry?.entity_id?.startsWith("update.")) return false;
 				const state = this._hass?.states?.[entry.entity_id];
@@ -1069,6 +1071,7 @@ class HaServerHealthCard extends HTMLElement {
 			});
 
 			const rawAddons = addonsResponse?.data?.addons ?? addonsResponse?.addons ?? [];
+			this._supervisorAddons = Array.isArray(rawAddons) ? rawAddons : [];
 			const apps = (Array.isArray(rawAddons) ? rawAddons : []).map((addon) => {
 				const match = this._metricMatch(
 					devices || [], metricsByDevice,
@@ -2215,6 +2218,28 @@ class HaServerHealthCard extends HTMLElement {
 		return this._renderSection("network", "mdi:lan", this._t("sections.network"), `<div class="network-interfaces">${rows}</div>`, this._sectionSummary("network"));
 	}
 
+	_updateRegistryEntry(entityId) {
+		return this._entityRegistry.find((entry) => entry.entity_id === entityId)
+			|| this._hass?.entities?.[entityId]
+			|| null;
+	}
+
+	_updateAddonMatch(state) {
+		const entry = this._updateRegistryEntry(state?.entity_id);
+		if (!entry || String(entry.platform || "").toLowerCase() !== "hassio" || !entry.device_id) return null;
+		const device = this._deviceRegistry.find((item) => item.id === entry.device_id)
+			|| this._hass?.devices?.[entry.device_id]
+			|| null;
+		if (!device) return null;
+		const addons = this._supervisorAddons?.length ? this._supervisorAddons : (this._containersApps.apps || []);
+		const matches = addons
+			.map((addon) => ({ addon, score: this._addonMatchScore(device, addon) }))
+			.filter((match) => match.score > 0)
+			.sort((left, right) => right.score - left.score);
+		if (!matches.length || (matches[1] && matches[0].score === matches[1].score)) return null;
+		return matches[0].addon;
+	}
+
 	_updateMetadata(state) {
 		const deviceClass = String(state.attributes?.device_class || "").toLowerCase();
 		const entityId = state.entity_id.toLowerCase();
@@ -2222,6 +2247,7 @@ class HaServerHealthCard extends HTMLElement {
 		const haystack = `${entityId} ${name}`;
 		if (/^update\.home_assistant_(?:core|supervisor|operating_system)(?:_|$)/.test(entityId)) return { category: "home-assistant", icon: "mdi:home-assistant", label: this._t("labels.updateGroupHomeAssistant") };
 		if (deviceClass === "firmware") return { category: "firmware", icon: "mdi:chip", label: this._t("labels.updateTypeFirmware") };
+		if (this._updateAddonMatch(state)) return { category: "apps", icon: "mdi:docker", label: this._t("labels.updateTypeApplication") };
 		if (/addon|add_on|zigbee2mqtt|mosquitto|studio code|terminal|ssh|matter server|thread border router|esphome/.test(haystack)) return { category: "apps", icon: "mdi:docker", label: this._t("labels.updateTypeApplication") };
 		if (this._marketplaceUpdateEntities.has(state.entity_id)) return { category: "marketplace", icon: "mdi:package-up", label: this._t("labels.updateTypeMarketplace") };
 		return { category: "others", icon: "mdi:package-up", label: this._t("labels.updateGroupOthers") };
