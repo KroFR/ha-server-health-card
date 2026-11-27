@@ -2486,7 +2486,7 @@ class HaServerHealthCard extends HTMLElement {
 			const statusClass = agent.failed ? "failed" : "ok";
 			const status = agent.failed ? this._t("labels.backupFailed") : this._t("labels.backupOk");
 			const icon = agent.id === "hassio.local" ? "mdi:harddisk" : "mdi:cloud-check-outline";
-			return `<div class="backup-agent ${statusClass}"><ha-icon icon="${icon}"></ha-icon><div class="backup-agent-main"><strong>${this._escape(agent.name)}</strong><small>${this._escape(count)} · ${this._escape(latest)}</small></div><div class="backup-agent-side"><span>${this._escape(size)}</span><b class="backup-result-pill ${statusClass}">${this._escape(status)}</b></div></div>`;
+			return `<div class="backup-agent ${statusClass} is-clickable" data-navigate="/config/backup/settings" role="button" tabindex="0"><ha-icon icon="${icon}"></ha-icon><div class="backup-agent-main"><strong>${this._escape(agent.name)}</strong><small>${this._escape(count)} · ${this._escape(latest)}</small></div><div class="backup-agent-side"><span>${this._escape(size)}</span><b class="backup-result-pill ${statusClass}">${this._escape(status)}</b></div></div>`;
 		}).join("");
 		return `<div class="backup-locations"><div class="instance-group-title">${this._t("labels.backupLocations")}</div><div class="backup-agent-list">${rows}</div></div>`;
 	}
@@ -2832,7 +2832,7 @@ class HaServerHealthCard extends HTMLElement {
 			.backup-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
 			.backup-locations { margin-top:9px; padding:9px 10px 4px; border:1px solid var(--divider-color); border-radius:10px; background:var(--ha-server-tile-background); }
 			.backup-agent-list { display:grid; }
-			.backup-agent { display:grid; grid-template-columns:22px minmax(0,1fr) auto; align-items:center; gap:8px; min-width:0; padding:8px 0; border-bottom:1px solid var(--divider-color); }
+			.backup-agent { display:grid; grid-template-columns:22px minmax(0,1fr) auto; align-items:center; gap:8px; min-width:0; padding:8px 0; border-bottom:1px solid var(--divider-color); } .backup-agent.is-clickable { cursor:pointer; } .backup-agent.is-clickable:hover,.backup-agent.is-clickable:focus-visible { background:color-mix(in srgb,var(--primary-color) 6%,transparent); } .backup-agent.is-clickable:focus-visible { outline:1px solid var(--primary-color); outline-offset:-1px; }
 			.backup-agent:last-child { border-bottom:0; }
 			.backup-agent > ha-icon { color:var(--primary-color); --mdc-icon-size:20px; }
 			.backup-agent.failed > ha-icon { color:var(--red); }
