@@ -2300,9 +2300,15 @@ class HaServerHealthCard extends HTMLElement {
 		if (isAbsoluteUrl) {
 			const isSameOrigin = parsedUrl.origin === window.location.origin;
 			const isZigbee2MqttGitHubAsset = parsedUrl.hostname === "github.com"
-				&& (parsedUrl.pathname === "/Koenkk/zigbee2mqtt" || parsedUrl.pathname.startsWith("/Koenkk/zigbee2mqtt/"));
-			const trusted = parsedUrl.protocol === "https:" && (isSameOrigin || isZigbee2MqttGitHubAsset);
-			this._signedPictureUrls.set(path, trusted ? parsedUrl.href : null);
+				&& parsedUrl.pathname.startsWith("/Koenkk/zigbee2mqtt/raw/");
+			const isZigbee2MqttRawAsset = parsedUrl.hostname === "raw.githubusercontent.com"
+				&& parsedUrl.pathname.startsWith("/Koenkk/zigbee2mqtt/");
+			let trustedUrl = parsedUrl.href;
+			if (isZigbee2MqttGitHubAsset) {
+				trustedUrl = `https://raw.githubusercontent.com/Koenkk/zigbee2mqtt/${parsedUrl.pathname.slice("/Koenkk/zigbee2mqtt/raw/".length)}${parsedUrl.search}${parsedUrl.hash}`;
+			}
+			const trusted = parsedUrl.protocol === "https:" && (isSameOrigin || isZigbee2MqttGitHubAsset || isZigbee2MqttRawAsset);
+			this._signedPictureUrls.set(path, trusted ? trustedUrl : null);
 			if (trusted) this._refreshDynamicContent(refreshIds);
 			return;
 		}
