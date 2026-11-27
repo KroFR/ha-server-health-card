@@ -1513,7 +1513,12 @@ class HaServerHealthCard extends HTMLElement {
 
 	_healthDetailsMarkup(health = this._health()) {
 		if (!health.issues.length) return "";
-		return `<div class="health-details ${health.level}" data-health-details${this._healthDetailsOpen ? "" : " hidden"}><div class="health-details-title">${this._t("card.healthDetails")}</div>${health.issues.map((issue) => `<div class="health-issue ${issue.level}"><i></i><span>${this._escape(issue.label)}</span><strong>${this._escape(issue.value)}</strong></div>`).join("")}</div>`;
+		return `<div class="health-details ${health.level}" data-health-details${this._healthDetailsOpen ? "" : " hidden"}>${health.issues.map((issue) => `<div class="health-issue ${issue.level}"><i></i><span>${this._escape(issue.label)}</span><strong>${this._escape(issue.value)}</strong></div>`).join("")}</div>`;
+	}
+
+	_healthPanelMarkup(health = this._health()) {
+		const open = this._healthDetailsOpen && health.issues.length > 0;
+		return `<div class="health-panel ${health.level}${open ? " expanded" : ""}"><button type="button" class="health-status ${health.level}" data-toggle-health aria-expanded="${String(open)}"><span class="health-status-main"><i></i><strong>${health.label}</strong></span><span class="health-status-count">${health.issues.length ? `${health.issues.length} ${this._t("labels.issues")}` : this._t("card.noIssues")}</span>${health.issues.length ? `<ha-icon icon="mdi:chevron-${open ? "up" : "down"}"></ha-icon>` : ""}</button>${this._healthDetailsMarkup(health)}</div>`;
 	}
 
 	_updateMiniGraphElement(element) {
@@ -1625,24 +1630,16 @@ class HaServerHealthCard extends HTMLElement {
 
 	_refreshHero() {
 		const health = this._health();
-		const pill = this.shadowRoot.querySelector(".health-status");
+		const panel = this.shadowRoot.querySelector(".health-panel");
 		const shouldShow = this._healthStatusVisible(health);
-		if (Boolean(pill) !== shouldShow) { this._render(); return; }
-		if (!pill) return;
-		pill.className = `health-status ${health.level}`;
-		pill.innerHTML = `<span class="health-status-main"><i></i><strong>${health.label}</strong></span><span class="health-status-count">${health.issues.length ? `${health.issues.length} ${this._t("labels.issues")}` : this._t("card.noIssues")}</span>${health.issues.length ? `<ha-icon icon="mdi:chevron-${this._healthDetailsOpen ? "up" : "down"}"></ha-icon>` : ""}`;
-		const current = this.shadowRoot.querySelector("[data-health-details]");
+		if (Boolean(panel) !== shouldShow) { this._render(); return; }
+		if (!panel) return;
 		const template = document.createElement("template");
-		template.innerHTML = this._healthDetailsMarkup(health);
+		template.innerHTML = this._healthPanelMarkup(health);
 		const fresh = template.content.firstElementChild;
-		if (current && fresh) {
-			current.replaceWith(fresh);
-		} else if (current && !fresh) {
-			current.remove();
-		} else if (!current && fresh) {
-			pill.insertAdjacentElement("afterend", fresh);
-		}
-		pill.setAttribute("aria-expanded", String(Boolean(fresh && this._healthDetailsOpen)));
+		if (!fresh) return;
+		panel.replaceWith(fresh);
+		this._bindHealthDetails(this.shadowRoot);
 	}
 
 	_refreshDynamicContent(forceIds = null) {
@@ -1771,8 +1768,7 @@ class HaServerHealthCard extends HTMLElement {
 							${this._config.show_header === false ? "" : `<div class="hero-copy"><h2>${this._escape(title)}</h2><span>${this._escape(subtitle)}</span></div>`}
 						</div>
 					</header>
-					${!showHealthStatus ? "" : `<button type="button" class="health-status ${health.level}" data-toggle-health aria-expanded="${String(this._healthDetailsOpen && health.issues.length > 0)}"><span class="health-status-main"><i></i><strong>${health.label}</strong></span><span class="health-status-count">${health.issues.length ? `${health.issues.length} ${this._t("labels.issues")}` : this._t("card.noIssues")}</span>${health.issues.length ? `<ha-icon icon="mdi:chevron-${this._healthDetailsOpen ? "up" : "down"}"></ha-icon>` : ""}</button>`}
-					${!showHealthStatus ? "" : this._healthDetailsMarkup(health)}
+					${!showHealthStatus ? "" : this._healthPanelMarkup(health)}
 					${this._renderConfiguredSections(counts, updates)}
 				</div>
 			</ha-card>
@@ -2566,8 +2562,9 @@ class HaServerHealthCard extends HTMLElement {
 				if (!details) return;
 				this._healthDetailsOpen = details.hidden;
 				details.hidden = !this._healthDetailsOpen;
+				button.closest(".health-panel")?.classList.toggle("expanded", this._healthDetailsOpen);
 				button.setAttribute("aria-expanded", String(this._healthDetailsOpen));
-				const chevron = button.querySelector("ha-icon");
+				const chevron = button.querySelector(":scope > ha-icon");
 				if (chevron) chevron.setAttribute("icon", `mdi:chevron-${this._healthDetailsOpen ? "up" : "down"}`);
 				this._saveCollapsedSections();
 			});
@@ -2699,7 +2696,12 @@ class HaServerHealthCard extends HTMLElement {
 		const details = this.shadowRoot.querySelector("[data-health-details]");
 		const button = this.shadowRoot.querySelector("[data-toggle-health]");
 		if (details) details.hidden = !this._healthDetailsOpen;
-		if (button) button.setAttribute("aria-expanded", String(Boolean(details && this._healthDetailsOpen)));
+		const open = Boolean(details && this._healthDetailsOpen);
+		button?.closest(".health-panel")?.classList.toggle("expanded", open);
+		if (button) {
+			button.setAttribute("aria-expanded", String(open));
+			button.querySelector(":scope > ha-icon")?.setAttribute("icon", `mdi:chevron-${open ? "up" : "down"}`);
+		}
 	}
 
 	async _ensureCollapsedSectionsStorage() {
@@ -2799,11 +2801,13 @@ class HaServerHealthCard extends HTMLElement {
 			.hero-copy { min-width:0; }
 			.hero-copy h2 { margin:0; font-size:var(--sh-font-title); font-weight:var(--sh-weight-medium); line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 			.hero-copy span { display:block; margin-top:2px; color:var(--secondary-text-color); font-size:var(--sh-font-small); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-			.health-status { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:9px; width:100%; box-sizing:border-box; margin:0 0 7px; padding:6px 9px; border:1px solid color-mix(in srgb,currentColor 35%,var(--divider-color)); border-radius:9px; color:inherit; background:color-mix(in srgb,currentColor 7%,transparent); font:inherit; text-align:left; cursor:pointer; }
+			.health-panel { overflow:hidden; margin:0 0 10px; border:1px solid color-mix(in srgb,currentColor 35%,var(--divider-color)); border-radius:10px; color:inherit; background:color-mix(in srgb,currentColor 5%,transparent); transition:border-color .18s ease,background-color .18s ease; }
+			.health-panel:hover { background:color-mix(in srgb,currentColor 8%,transparent); }
+			.health-status { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:9px; width:100%; box-sizing:border-box; margin:0; padding:8px 10px; border:0; color:inherit; background:transparent; font:inherit; text-align:left; cursor:pointer; }
 			.health-status-main { display:inline-flex; align-items:center; gap:6px; min-width:0; } .health-status-main i { width:6px; height:6px; flex:0 0 auto; border-radius:50%; background:currentColor; } .health-status-main strong { font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); } .health-status-count { overflow:hidden; color:var(--secondary-text-color); font-size:var(--sh-font-small); text-overflow:ellipsis; white-space:nowrap; } .health-status > ha-icon { --mdc-icon-size:16px; }
 			.healthy { color:var(--green); } .warning { color:var(--orange); } .critical { color:var(--red); } .info { color:var(--blue); }
-			.health-status.healthy { background:color-mix(in srgb,var(--green) 7%,transparent); } .health-status.warning { background:color-mix(in srgb,var(--orange) 8%,transparent); } .health-status.critical { background:color-mix(in srgb,var(--red) 8%,transparent); }
-			.health-details { display:grid; gap:5px; margin:0 2px 10px; padding:8px 10px; border:1px solid var(--divider-color); border-left:3px solid currentColor; border-radius:9px; background:var(--ha-server-tile-background); } .health-details[hidden] { display:none; } .health-details-title { color:var(--secondary-text-color); font-size:var(--sh-font-small); font-weight:var(--sh-weight-medium); text-transform:uppercase; letter-spacing:.04em; } .health-issue { display:grid; grid-template-columns:6px minmax(0,1fr) auto; align-items:center; gap:7px; font-size:var(--sh-font-body); } .health-issue i { width:6px; height:6px; border-radius:50%; background:currentColor; } .health-issue span { color:var(--primary-text-color); } .health-issue strong { color:currentColor; font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); white-space:nowrap; }
+			.health-panel.healthy { background:color-mix(in srgb,var(--green) 5%,transparent); } .health-panel.warning { background:color-mix(in srgb,var(--orange) 6%,transparent); } .health-panel.critical { background:color-mix(in srgb,var(--red) 6%,transparent); }
+			.health-details { display:grid; gap:0; margin:0 10px 8px; padding:2px 0 0; border-top:1px solid color-mix(in srgb,currentColor 28%,var(--divider-color)); } .health-details[hidden] { display:none; } .health-issue { display:grid; grid-template-columns:6px minmax(0,1fr) auto; align-items:center; gap:7px; padding:7px 2px; border-bottom:1px solid var(--divider-color); font-size:var(--sh-font-body); } .health-issue:last-child { border-bottom:0; } .health-issue i { width:6px; height:6px; border-radius:50%; background:currentColor; } .health-issue span { color:var(--primary-text-color); } .health-issue strong { color:currentColor; font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); white-space:nowrap; }
 			.section { border-top:1px solid var(--divider-color); }
 			.shell.no-header-content > .section:first-of-type { border-top:0; }
 			.section-head { display:flex; align-items:center; justify-content:space-between; width:100%; padding:9px 2px 7px; border:0; color:var(--primary-text-color); background:transparent; font:inherit; cursor:pointer; }
