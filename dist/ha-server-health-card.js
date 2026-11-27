@@ -1143,7 +1143,12 @@ class HaServerHealthCard extends HTMLElement {
 		const statusIcon = running ? "mdi:play" : "mdi:stop";
 		const version = info.version || item.version || "--";
 		const subtitle = app ? `${item.slug} · ${version}` : `hassio_${item.id} · ${version}`;
-		return `<div class="container-row ${running ? "running" : "stopped"}"><div class="container-icon"><ha-icon icon="${app ? "mdi:docker" : item.icon}"></ha-icon></div><div class="container-main"><strong>${this._escape(item.name)}</strong><small>${this._escape(subtitle)}</small></div><small class="container-status"><ha-icon icon="${statusIcon}"></ha-icon>${this._escape(status)}</small><div class="container-stats"><strong>${this._escape(this._containerStatsText(item))}</strong></div></div>`;
+		const cpuLevel = this._healthLevelFor("cpu", this._latestRecorderMean(item.cpuEntity));
+		const ramLevel = this._healthLevelFor("memory", this._latestRecorderMean(item.ramEntity));
+		const healthLevel = [cpuLevel, ramLevel].includes("critical")
+			? "critical"
+			: [cpuLevel, ramLevel].includes("warning") ? "warning" : "";
+		return `<div class="container-row ${running ? "running" : "stopped"} ${healthLevel}"><div class="container-icon"><ha-icon icon="${app ? "mdi:docker" : item.icon}"></ha-icon></div><div class="container-main"><strong>${this._escape(item.name)}</strong><small>${this._escape(subtitle)}</small></div><small class="container-status"><ha-icon icon="${statusIcon}"></ha-icon>${this._escape(status)}</small><div class="container-stats"><strong>${this._escape(this._containerStatsText(item))}</strong></div></div>`;
 	}
 
 	_renderContainersApps() {
@@ -1338,6 +1343,32 @@ class HaServerHealthCard extends HTMLElement {
 		return this._healthLevelFor(key, resolvedValue);
 	}
 
+	_containerHealthIssues() {
+		const sources = [
+			...(this._containersApps.systems || []).map((item) => ({ ...item, section: "system" })),
+			...(this._containersApps.apps || []).map((item) => ({ ...item, section: "containers-apps" })),
+		];
+		const issues = [];
+		for (const item of sources) {
+			for (const [metric, entityId, metricLabel] of [
+				["cpu", item.cpuEntity, this._t("labels.cpu")],
+				["memory", item.ramEntity, this._t("labels.memory")],
+			]) {
+				const value = this._latestRecorderMean(entityId);
+				const level = this._healthLevelFor(metric, value);
+				if (!level) continue;
+				issues.push({
+					metric: `${item.id || item.slug || item.name}:${metric}`,
+					section: item.section,
+					level,
+					label: `${item.name} · ${metricLabel}`,
+					value: `${new Intl.NumberFormat(this._language(), { maximumFractionDigits: 1 }).format(value)}%`,
+				});
+			}
+		}
+		return issues;
+	}
+
 	_healthIssues() {
 		if (this._config?.health_analysis_enabled === false) return [];
 		const issues = [];
@@ -1352,6 +1383,7 @@ class HaServerHealthCard extends HTMLElement {
 			if (!level) continue;
 			issues.push({ metric, section: "system", level, label, value: `${new Intl.NumberFormat(this._language(), { maximumFractionDigits: 1 }).format(value)}%` });
 		}
+		issues.push(...this._containerHealthIssues());
 		const sizeMetrics = [
 			["database", this._entities.database, this._t("labels.database"), "system"],
 			["backupSize", this._entities.lastBackupSize, this._t("labels.backupSizeHealth"), "backups"],
@@ -1815,7 +1847,7 @@ class HaServerHealthCard extends HTMLElement {
 						[core.cpuEntity, "mdi:cpu-64-bit", this._t("labels.cpu"), "blue"],
 						[core.ramEntity, "mdi:memory", this._t("labels.memory"), "purple"],
 					].map(([entityId, icon, label, tone]) => this._miniGraphTile(
-						icon, label, entityId, { unit: "%", tone, decimals: 1, recorderMetric: true },
+						icon, label, entityId, { unit: "%", tone, decimals: 1, recorderMetric: true, healthMetric: label === this._t("labels.cpu") ? "cpu" : "memory" },
 					)).join("")}
 					${this._optionalIntegrationTile(
 						"mdi:clock-outline",
@@ -1835,7 +1867,7 @@ class HaServerHealthCard extends HTMLElement {
 						[supervisor.cpuEntity, "mdi:cpu-64-bit", this._t("labels.cpu"), "blue"],
 						[supervisor.ramEntity, "mdi:memory", this._t("labels.memory"), "purple"],
 					].map(([entityId, icon, label, tone]) => this._miniGraphTile(
-						icon, label, entityId, { unit: "%", tone, decimals: 1, recorderMetric: true },
+						icon, label, entityId, { unit: "%", tone, decimals: 1, recorderMetric: true, healthMetric: label === this._t("labels.cpu") ? "cpu" : "memory" },
 					)).join("")}
 				</div>
 			</div>` : "";
@@ -2714,7 +2746,7 @@ class HaServerHealthCard extends HTMLElement {
 			.storage-volume.warning .storage-meter i { background:var(--orange); } .storage-volume.warning .storage-percent { color:var(--orange); }
 			.storage-volume.critical .storage-meter i { background:var(--red); } .storage-volume.critical .storage-percent { color:var(--red); }
 			.empty { display:flex; justify-content:center; align-items:center; gap:6px; padding:12px; color:var(--green); font-size:11px; }
-			.containers-apps { display:grid; gap:9px; } .containers-group { overflow:hidden; border:1px solid var(--divider-color); border-radius:10px; background:var(--ha-server-tile-background); } .containers-group-head { display:grid; grid-template-columns:minmax(0,1fr) auto 18px; align-items:center; gap:7px; width:100%; padding:8px 10px; border:0; border-bottom:1px solid var(--divider-color); color:var(--primary-text-color); background:transparent; font:inherit; text-align:left; cursor:pointer; } .containers-group.collapsed .containers-group-head { border-bottom:0; } .containers-group-head strong { color:var(--secondary-text-color); font-size:var(--sh-font-small); font-weight:var(--sh-weight-medium); text-transform:uppercase; letter-spacing:.04em; } .containers-group-head span,.containers-summary { color:var(--primary-text-color); font-size:10px; font-weight:600; white-space:nowrap; } .containers-group-head ha-icon { color:var(--secondary-text-color); --mdc-icon-size:17px; } .container-list { display:grid; } .containers-group.collapsed .container-list { display:none; } .container-row { display:grid; grid-template-columns:34px minmax(0,1fr) auto; grid-template-areas:"icon main status" "icon stats stats"; align-items:center; gap:4px 9px; min-width:0; padding:8px 10px; border-bottom:1px solid var(--divider-color); } .container-row:last-child { border-bottom:0; } .container-icon { grid-area:icon; display:grid; place-items:center; width:30px; height:30px; border-radius:50%; color:var(--secondary-text-color); background:color-mix(in srgb,var(--secondary-text-color) 12%,transparent); } .container-icon ha-icon { --mdc-icon-size:17px; } .container-main { grid-area:main; min-width:0; } .container-main strong,.container-main small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .container-main strong { color:var(--primary-text-color); font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); } .container-main small { margin-top:2px; color:var(--secondary-text-color); font-size:10px; } .container-status { grid-area:status; display:inline-flex; align-items:center; gap:4px; justify-self:end; margin:0; padding:2px 6px; border-radius:999px; color:var(--green); background:color-mix(in srgb,var(--green) 13%,transparent); font-size:10px; font-weight:500; white-space:nowrap; } .container-status ha-icon { flex:0 0 auto; --mdc-icon-size:12px; } .container-row.stopped .container-status { color:var(--secondary-text-color); background:color-mix(in srgb,var(--secondary-text-color) 10%,transparent); } .container-stats { grid-area:stats; min-width:0; } .container-stats strong { display:block; overflow:hidden; color:var(--primary-text-color); font-size:10px; font-weight:600; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
+			.containers-apps { display:grid; gap:9px; } .containers-group { overflow:hidden; border:1px solid var(--divider-color); border-radius:10px; background:var(--ha-server-tile-background); } .containers-group-head { display:grid; grid-template-columns:minmax(0,1fr) auto 18px; align-items:center; gap:7px; width:100%; padding:8px 10px; border:0; border-bottom:1px solid var(--divider-color); color:var(--primary-text-color); background:transparent; font:inherit; text-align:left; cursor:pointer; } .containers-group.collapsed .containers-group-head { border-bottom:0; } .containers-group-head strong { color:var(--secondary-text-color); font-size:var(--sh-font-small); font-weight:var(--sh-weight-medium); text-transform:uppercase; letter-spacing:.04em; } .containers-group-head span,.containers-summary { color:var(--primary-text-color); font-size:10px; font-weight:600; white-space:nowrap; } .containers-group-head ha-icon { color:var(--secondary-text-color); --mdc-icon-size:17px; } .container-list { display:grid; } .containers-group.collapsed .container-list { display:none; } .container-row { display:grid; grid-template-columns:34px minmax(0,1fr) auto; grid-template-areas:"icon main status" "icon stats stats"; align-items:center; gap:4px 9px; min-width:0; padding:8px 10px; border-bottom:1px solid var(--divider-color); } .container-row:last-child { border-bottom:0; } .container-icon { grid-area:icon; display:grid; place-items:center; width:30px; height:30px; border-radius:50%; color:var(--secondary-text-color); background:color-mix(in srgb,var(--secondary-text-color) 12%,transparent); } .container-icon ha-icon { --mdc-icon-size:17px; } .container-main { grid-area:main; min-width:0; } .container-main strong,.container-main small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .container-main strong { color:var(--primary-text-color); font-size:var(--sh-font-body); font-weight:var(--sh-weight-medium); } .container-main small { margin-top:2px; color:var(--secondary-text-color); font-size:10px; } .container-status { grid-area:status; display:inline-flex; align-items:center; gap:4px; justify-self:end; margin:0; padding:2px 6px; border-radius:999px; color:var(--green); background:color-mix(in srgb,var(--green) 13%,transparent); font-size:10px; font-weight:500; white-space:nowrap; } .container-status ha-icon { flex:0 0 auto; --mdc-icon-size:12px; } .container-row.stopped .container-status { color:var(--secondary-text-color); background:color-mix(in srgb,var(--secondary-text-color) 10%,transparent); } .container-stats { grid-area:stats; min-width:0; } .container-stats strong { display:block; overflow:hidden; color:var(--primary-text-color); font-size:10px; font-weight:600; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; } .container-row.warning .container-stats strong { color:var(--orange); } .container-row.critical .container-stats strong { color:var(--red); }
 			.backup-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
 			.backup-locations { margin-top:9px; padding:9px 10px 4px; border:1px solid var(--divider-color); border-radius:10px; background:var(--ha-server-tile-background); }
 			.backup-agent-list { display:grid; }
