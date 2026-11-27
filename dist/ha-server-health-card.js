@@ -463,7 +463,7 @@ class HaServerHealthCard extends HTMLElement {
 		this._recorderInfo = { loading: false, loadedAt: 0, data: null };
 		this._databaseHistory7d = { key: "", loading: false, loadedAt: 0, points: [] };
 		this._containersApps = { loading: false, loadedAt: 0, systems: [], apps: [] };
-		this._containerRecorderMetrics = { loadedAt: 0, series: {}, core: null };
+		this._containerRecorderMetrics = { loadedAt: 0, series: {}, core: null, supervisor: null };
 		this._containersAppsLoadPromise = null;
 		this._containersAppsRefreshTimer = null;
 		this._containerGroupsCollapsed = new Set(["systems", "apps"]);
@@ -1093,8 +1093,10 @@ class HaServerHealthCard extends HTMLElement {
 
 			const loadedAt = Date.now();
 			this._containerRecorderMetrics = {
-				loadedAt, series,
+				loadedAt,
+				series,
 				core: systems.find((item) => item.id === "core") || null,
+				supervisor: systems.find((item) => item.id === "supervisor") || null,
 			};
 			this._containersApps = { loading: false, loadedAt, systems, apps };
 			this._refreshDynamicContent(["containers-apps", "system"]);
@@ -1783,6 +1785,7 @@ class HaServerHealthCard extends HTMLElement {
 			["disk", "mdi:harddisk", this._t("labels.disk"), "dusty-pink"],
 		];
 		const core = this._containerRecorderMetrics.core;
+		const supervisor = this._containerRecorderMetrics.supervisor;
 		const hostGroup = `
 			<div class="system-metric-group">
 				<div class="instance-group-title">${this._escape(this._t("labels.host"))}</div>
@@ -1806,9 +1809,21 @@ class HaServerHealthCard extends HTMLElement {
 					)).join("")}
 				</div>
 			</div>` : "";
+		const supervisorGroup = supervisor ? `
+			<div class="system-metric-group">
+				<div class="instance-group-title">${this._escape(this._t("labels.supervisor"))}</div>
+				<div class="resource-grid core-resource-grid">
+					${[
+						[supervisor.cpuEntity, "mdi:cpu-64-bit", this._t("labels.cpu"), "blue"],
+						[supervisor.ramEntity, "mdi:memory", this._t("labels.memory"), "purple"],
+					].map(([entityId, icon, label, tone]) => this._miniGraphTile(
+						icon, label, entityId, { unit: "%", tone, decimals: 1, recorderMetric: true },
+					)).join("")}
+				</div>
+			</div>` : "";
 		return this._renderSection(
 			"system", "mdi:server", this._t("sections.system"),
-			`${hostGroup}${coreGroup}`, this._sectionSummary("system"),
+			`${hostGroup}${coreGroup}${supervisorGroup}`, this._sectionSummary("system"),
 		);
 	}
 
